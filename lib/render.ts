@@ -1,5 +1,5 @@
 import type { DemoDocument } from "./document";
-import { cameraAt } from "./timeline";
+import { cameraAt, captionTextAt } from "./timeline";
 
 export const OUTPUT_WIDTH = 1920;
 export const OUTPUT_HEIGHT = 1080;
@@ -89,6 +89,48 @@ export function drawFrame(
       frameHeight,
     );
   }
+  ctx.restore();
+
+  const caption = captionTextAt(doc, clipId, sourceSec)?.trim();
+  if (caption) drawCaption(ctx, caption, frameY + frameHeight);
+}
+
+function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number) {
+  const lines = [""];
+  for (const char of text) {
+    const line = lines[lines.length - 1];
+    if (line && ctx.measureText(line + char).width > maxWidth) lines.push(char);
+    else lines[lines.length - 1] = line + char;
+  }
+  return lines;
+}
+
+// ズームの影響を受けないよう、映像の切り抜きとは別に最前面へ描く。
+function drawCaption(ctx: CanvasRenderingContext2D, text: string, frameBottom: number) {
+  const { width } = ctx.canvas;
+  const fontSize = width * 0.024;
+  const lineHeight = fontSize * 1.4;
+  const paddingX = fontSize * 0.9;
+  const paddingY = fontSize * 0.5;
+
+  ctx.save();
+  ctx.font = `600 ${fontSize}px system-ui, "Hiragino Sans", sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  const lines = wrapText(ctx, text, width * 0.7);
+  const boxWidth = Math.max(...lines.map((line) => ctx.measureText(line).width)) + paddingX * 2;
+  const boxHeight = lines.length * lineHeight + paddingY * 2;
+  const boxY = frameBottom - boxHeight - fontSize;
+
+  ctx.fillStyle = "rgba(0, 0, 0, 0.72)";
+  ctx.beginPath();
+  ctx.roundRect((width - boxWidth) / 2, boxY, boxWidth, boxHeight, fontSize * 0.4);
+  ctx.fill();
+
+  ctx.fillStyle = "#fff";
+  lines.forEach((line, index) => {
+    ctx.fillText(line, width / 2, boxY + paddingY + lineHeight * (index + 0.5));
+  });
   ctx.restore();
 }
 

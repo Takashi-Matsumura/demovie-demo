@@ -2,16 +2,23 @@
 
 import { useRef, type PointerEvent } from "react";
 import type { DemoDocument } from "@/lib/document";
-import { clipSpans, totalDuration, zoomSpans } from "@/lib/timeline";
+import { captionSpans, clipSpans, totalDuration, zoomSpans } from "@/lib/timeline";
 
 type TimelineProps = {
   doc: DemoDocument;
   timeSec: number;
   selectedZoomId: string | null;
+  selectedCaptionId: string | null;
   onSeek: (timeSec: number) => void;
 };
 
-export function Timeline({ doc, timeSec, selectedZoomId, onSeek }: TimelineProps) {
+export function Timeline({
+  doc,
+  timeSec,
+  selectedZoomId,
+  selectedCaptionId,
+  onSeek,
+}: TimelineProps) {
   const trackRef = useRef<HTMLDivElement>(null);
   const total = totalDuration(doc);
   const percent = (sec: number) => `${(sec / total) * 100}%`;
@@ -31,7 +38,7 @@ export function Timeline({ doc, timeSec, selectedZoomId, onSeek }: TimelineProps
       aria-valuemin={0}
       aria-valuemax={total}
       aria-valuenow={timeSec}
-      className="relative flex h-28 touch-none cursor-text flex-col gap-1 select-none"
+      className="relative flex h-36 touch-none cursor-text flex-col gap-1 select-none"
       onPointerDown={(event) => {
         event.currentTarget.setPointerCapture(event.pointerId);
         seekFromPointer(event);
@@ -62,6 +69,27 @@ export function Timeline({ doc, timeSec, selectedZoomId, onSeek }: TimelineProps
             onClick={() => onSeek((startSec + endSec) / 2)}
           >
             {zoom.depth.toFixed(1)}×
+          </button>
+        ))}
+      </div>
+
+      <div className="relative h-7 rounded bg-paper-2">
+        {captionSpans(doc).map(({ caption, startSec, endSec }) => (
+          <button
+            key={caption.id}
+            type="button"
+            aria-label={`キャプション「${caption.text}」を選択`}
+            aria-pressed={caption.id === selectedCaptionId}
+            style={{ left: percent(startSec), width: percent(endSec - startSec) }}
+            className={`absolute inset-y-1 overflow-hidden rounded-sm px-1.5 text-left text-xs whitespace-nowrap transition-colors duration-(--dur-fast) ${
+              caption.id === selectedCaptionId
+                ? "bg-accent text-accent-ink"
+                : "bg-zoom text-ink hover:bg-accent hover:text-accent-ink"
+            }`}
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={() => onSeek((startSec + endSec) / 2)}
+          >
+            {caption.text}
           </button>
         ))}
       </div>

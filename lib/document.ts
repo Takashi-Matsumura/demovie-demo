@@ -25,6 +25,17 @@ const zoomSchema = z
   })
   .refine((zoom) => zoom.sourceEndSec > zoom.sourceStartSec);
 
+// ズームと同じ理由で素材時刻で持つ。編集中に空にできるよう text は空文字を許す。
+const captionSchema = z
+  .object({
+    id: z.string(),
+    clipId: z.string(),
+    sourceStartSec: z.number().min(0),
+    sourceEndSec: z.number().min(0),
+    text: z.string(),
+  })
+  .refine((caption) => caption.sourceEndSec > caption.sourceStartSec);
+
 const lookSchema = z.object({
   background: z.enum(BACKGROUND_IDS),
   paddingPct: z.number().min(0).max(20),
@@ -44,12 +55,14 @@ export const documentSchema = z.object({
   asset: assetSchema,
   clips: z.array(clipSchema).min(1),
   zooms: z.array(zoomSchema),
+  captions: z.array(captionSchema),
   look: lookSchema,
 });
 
 export type DemoDocument = z.infer<typeof documentSchema>;
 export type Clip = z.infer<typeof clipSchema>;
 export type Zoom = z.infer<typeof zoomSchema>;
+export type Caption = z.infer<typeof captionSchema>;
 export type Look = z.infer<typeof lookSchema>;
 export type Asset = z.infer<typeof assetSchema>;
 
@@ -65,6 +78,7 @@ export function createDocument(asset: Asset): DemoDocument {
       { id: newId(), sourceStartSec: 0, sourceEndSec: asset.durationSec },
     ],
     zooms: [],
+    captions: [],
     look: { background: "dusk", paddingPct: 6, radiusPct: 2, shadow: true },
   };
 }

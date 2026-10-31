@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { createDocument, documentSchema, type DemoDocument } from "./document";
+import { createDocument, documentSchema, newId, type DemoDocument } from "./document";
 import {
   addZoom,
   cameraAt,
+  captionAt,
+  captionSpans,
+  captionTextAt,
   deleteClip,
   locate,
   moveClip,
@@ -112,6 +115,43 @@ describe("zoom under the playhead", () => {
     const moved = moveClip(doc, doc.clips[1].id, -1);
     expect(zoomAt(moved, 2)?.zoom.id).toBe(zoomId);
     expect(zoomAt(moved, 5)).toBeUndefined();
+  });
+});
+
+describe("captions", () => {
+  function withCaption(doc: DemoDocument, clipIndex: number, from: number, to: number) {
+    const caption = {
+      id: newId(),
+      clipId: doc.clips[clipIndex].id,
+      sourceStartSec: from,
+      sourceEndSec: to,
+      text: "保存する",
+    };
+    return { ...doc, captions: [...doc.captions, caption] };
+  }
+
+  it("divides a caption that crosses the cut", () => {
+    const split = splitAt(withCaption(makeDoc(), 0, 3, 5), 4);
+    expect(captionSpans(split).map(({ startSec, endSec }) => [startSec, endSec])).toEqual([
+      [3, 4],
+      [4, 5],
+    ]);
+    expect(documentSchema.safeParse(split).success).toBe(true);
+  });
+
+  it("moves with its clip and goes away with it", () => {
+    const doc = withCaption(splitAt(makeDoc(), 4), 1, 5, 7);
+    const moved = moveClip(doc, doc.clips[1].id, -1);
+    expect(captionAt(moved, 2)?.caption.text).toBe("保存する");
+    expect(deleteClip(doc, doc.clips[1].id).captions).toEqual([]);
+  });
+
+  it("finds the text by source time", () => {
+    const doc = withCaption(makeDoc(), 0, 3, 5);
+    const clipId = doc.clips[0].id;
+    expect(captionTextAt(doc, clipId, 2.9)).toBeUndefined();
+    expect(captionTextAt(doc, clipId, 3)).toBe("保存する");
+    expect(captionTextAt(doc, clipId, 5)).toBeUndefined();
   });
 });
 

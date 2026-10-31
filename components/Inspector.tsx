@@ -1,16 +1,19 @@
 "use client";
 
 import { useState } from "react";
-import { BACKGROUND_IDS, type DemoDocument, type Look, type Zoom } from "@/lib/document";
+import { BACKGROUND_IDS, type Caption, type DemoDocument, type Look, type Zoom } from "@/lib/document";
 import { BACKGROUNDS } from "@/lib/render";
 
 type InspectorProps = {
   doc: DemoDocument;
   zoom: Zoom | null;
+  caption: Caption | null;
   onLook: (patch: Partial<Look>) => void;
   onZoom: (patch: Partial<Pick<Zoom, "depth" | "focusX" | "focusY">>) => void;
   onZoomLength: (lengthSec: number) => void;
   onZoomRemove: () => void;
+  onCaptionText: (text: string) => void;
+  onCaptionRemove: () => void;
 };
 
 type SliderProps = {
@@ -45,7 +48,17 @@ function Slider({ label, value, min, max, step, unit, onChange }: SliderProps) {
   );
 }
 
-export function Inspector({ doc, zoom, onLook, onZoom, onZoomLength, onZoomRemove }: InspectorProps) {
+export function Inspector({
+  doc,
+  zoom,
+  caption,
+  onLook,
+  onZoom,
+  onZoomLength,
+  onZoomRemove,
+  onCaptionText,
+  onCaptionRemove,
+}: InspectorProps) {
   const { look } = doc;
   const [lookOpen, setLookOpen] = useState(true);
 
@@ -169,6 +182,28 @@ export function Inspector({ doc, zoom, onLook, onZoom, onZoomLength, onZoomRemov
             step={0.1}
             unit="秒"
             onChange={onZoomLength}
+          />
+        </section>
+      )}
+
+      {caption && (
+        <section className="flex flex-col gap-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold">キャプション</h2>
+            <button
+              type="button"
+              className="rounded px-2 py-1 text-sm text-danger hover:bg-paper-3"
+              onClick={onCaptionRemove}
+            >
+              削除
+            </button>
+          </div>
+          <textarea
+            aria-label="キャプションの本文"
+            rows={3}
+            className="w-full resize-none rounded bg-paper-3 p-2 text-sm"
+            value={caption.text}
+            onChange={(event) => onCaptionText(event.target.value)}
           />
         </section>
       )}

@@ -1,4 +1,4 @@
-import { newId, type Clip, type DemoDocument, type Zoom } from "./document";
+import { newId, type Caption, type Clip, type DemoDocument, type Zoom } from "./document";
 
 // タイムライン時刻と素材時刻の変換はこのファイルだけが行う。
 // クリップは常に隙間なく連続するので、タイムライン時刻はクリップ長の累積で決まる。
@@ -42,24 +42,54 @@ export function locate(doc: DemoDocument, timelineSec: number): Location {
   };
 }
 
-export function zoomSpans(doc: DemoDocument) {
+function rangeSpans<T extends Zoom | Caption>(doc: DemoDocument, items: T[]) {
   return clipSpans(doc).flatMap((span) =>
-    doc.zooms
-      .filter((zoom) => zoom.clipId === span.clip.id)
-      .flatMap((zoom) => {
-        const from = Math.max(zoom.sourceStartSec, span.clip.sourceStartSec);
-        const to = Math.min(zoom.sourceEndSec, span.clip.sourceEndSec);
+    items
+      .filter((item) => item.clipId === span.clip.id)
+      .flatMap((item) => {
+        const from = Math.max(item.sourceStartSec, span.clip.sourceStartSec);
+        const to = Math.min(item.sourceEndSec, span.clip.sourceEndSec);
         if (to <= from) return [];
         const shift = span.startSec - span.clip.sourceStartSec;
-        return [{ zoom, startSec: from + shift, endSec: to + shift }];
+        return [{ item, startSec: from + shift, endSec: to + shift }];
       }),
   );
+}
+
+export function zoomSpans(doc: DemoDocument) {
+  return rangeSpans(doc, doc.zooms).map(({ item, ...span }) => ({ zoom: item, ...span }));
+}
+
+export function captionSpans(doc: DemoDocument) {
+  return rangeSpans(doc, doc.captions).map(({ item, ...span }) => ({ caption: item, ...span }));
 }
 
 export function zoomAt(doc: DemoDocument, timelineSec: number) {
   return zoomSpans(doc).find(
     ({ startSec, endSec }) => timelineSec >= startSec && timelineSec < endSec,
   );
+}
+
+export function captionAt(doc: DemoDocument, timelineSec: number) {
+  return captionSpans(doc).find(
+    ({ startSec, endSec }) => timelineSec >= startSec && timelineSec < endSec,
+  );
+}
+
+function splitRanges<T extends Zoom | Caption>(
+  items: T[],
+  clipId: string,
+  tailId: string,
+  sourceSec: number,
+): T[] {
+  return items.flatMap((item): T[] => {
+    if (item.clipId !== clipId || item.sourceEndSec <= sourceSec) return [item];
+    if (item.sourceStartSec >= sourceSec) return [{ ...item, clipId: tailId }];
+    return [
+      { ...item, sourceEndSec: sourceSec },
+      { ...item, id: newId(), clipId: tailId, sourceStartSec: sourceSec },
+    ];
+  });
 }
 
 export function splitAt(doc: DemoDocument, timelineSec: number): DemoDocument {
@@ -73,17 +103,13 @@ export function splitAt(doc: DemoDocument, timelineSec: number): DemoDocument {
   const head: Clip = { ...clip, sourceEndSec: sourceSec };
   const tail: Clip = { id: newId(), sourceStartSec: sourceSec, sourceEndSec: clip.sourceEndSec };
 
-  const zooms = doc.zooms.flatMap((zoom): Zoom[] => {
-    if (zoom.clipId !== clip.id || zoom.sourceEndSec <= sourceSec) return [zoom];
-    if (zoom.sourceStartSec >= sourceSec) return [{ ...zoom, clipId: tail.id }];
-    return [
-      { ...zoom, sourceEndSec: sourceSec },
-      { ...zoom, id: newId(), clipId: tail.id, sourceStartSec: sourceSec },
-    ];
-  });
-
   const clips = doc.clips.flatMap((item) => (item.id === clip.id ? [head, tail] : [item]));
-  return { ...doc, clips, zooms };
+  return {
+    ...doc,
+    clips,
+    zooms: splitRanges(doc.zooms, clip.id, tail.id, sourceSec),
+    captions: splitRanges(doc.captions, clip.id, tail.id, sourceSec),
+  };
 }
 
 export function deleteClip(doc: DemoDocument, clipId: string): DemoDocument {
@@ -92,6 +118,7 @@ export function deleteClip(doc: DemoDocument, clipId: string): DemoDocument {
     ...doc,
     clips: doc.clips.filter((clip) => clip.id !== clipId),
     zooms: doc.zooms.filter((zoom) => zoom.clipId !== clipId),
+    captions: doc.captions.filter((caption) => caption.clipId !== clipId),
   };
 }
 
@@ -168,6 +195,24 @@ export function setZoomLength(doc: DemoDocument, zoomId: string, lengthSec: numb
 
 export function removeZoom(doc: DemoDocument, zoomId: string): DemoDocument {
   return { ...doc, zooms: doc.zooms.filter((zoom) => zoom.id !== zoomId) };
+}
+
+export function updateCaption(doc: DemoDocument, captionId: string, text: string): DemoDocument {
+  return {
+    ...doc,
+    captions: doc.captions.map((item) => (item.id === captionId ? { ...item, text } : item)),
+  };
+}
+
+export function removeCaption(doc: DemoDocument, captionId: string): DemoDocument {
+  return { ...doc, captions: doc.captions.filter((caption) => caption.id !== captionId) };
+}
+
+export function captionTextAt(doc: DemoDocument, clipId: string, sourceSec: number) {
+  return doc.captions.find(
+    (item) =>
+      item.clipId === clipId && sourceSec >= item.sourceStartSec && sourceSec < item.sourceEndSec,
+  )?.text;
 }
 
 function smoothstep(value: number) {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type ChangeEvent } from "react";
+import { generateCaptions } from "@/lib/captions";
 import { createDocument, type DemoDocument } from "@/lib/document";
 import { exportVideo } from "@/lib/export";
 import {
@@ -13,13 +14,16 @@ import {
 import { OUTPUT_HEIGHT, OUTPUT_WIDTH } from "@/lib/render";
 import {
   addZoom,
+  captionAt,
   deleteClip,
   locate,
   moveClip,
+  removeCaption,
   removeZoom,
   setZoomLength,
   splitAt,
   totalDuration,
+  updateCaption,
   updateZoom,
   zoomAt,
   zoomSpans,
@@ -133,7 +137,7 @@ function StartScreen({ error, onError, onOpen }: StartScreenProps) {
         <div className="flex flex-col gap-3">
           <h1 className="text-4xl font-semibold tracking-tight">Demovie</h1>
           <p className="leading-7 text-ink-2">
-            録画に背景とズームを足して、見せられるデモ動画にします。動画はブラウザの中だけで処理し、どこにも送信しません。
+            録画に背景とズームを足して、見せられるデモ動画にします。動画はこの PC の中だけで処理し、外部には送信しません。
           </p>
         </div>
 
@@ -184,6 +188,11 @@ type ExportState =
   | { status: "done"; url: string; fileName: string }
   | { status: "failed"; message: string };
 
+type CaptionState =
+  | { status: "idle" }
+  | { status: "running"; message: string }
+  | { status: "failed"; message: string };
+
 type WorkspaceProps = {
   doc: DemoDocument;
   source: Source;
@@ -199,13 +208,17 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const captionAbortRef = useRef<AbortController | null>(null);
   const { timeSec, playing, seek, toggle } = usePlayer(doc, videoRef, canvasRef);
   const [exportState, setExportState] = useState<ExportState>({ status: "idle" });
+  const [captionState, setCaptionState] = useState<CaptionState>({ status: "idle" });
 
-  // 編集対象のズームは選択状態を持たず、再生位置から決める。
+  // 編集対象のズームとキャプションは選択状態を持たず、再生位置から決める。
   const zoom = zoomAt(doc, timeSec)?.zoom ?? null;
+  const caption = captionAt(doc, timeSec)?.caption ?? null;
   const currentClip = locate(doc, timeSec).clip;
   const exporting = exportState.status === "running";
+  const generating = captionState.status === "running";
 
   useEffect(() => {
     if (exportState.status !== "done") return;
@@ -216,7 +229,7 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement;
-      if (target.closest("input, button, [role='slider']")) return;
+      if (target.closest("input, textarea, button, [role='slider']")) return;
       if (event.code === "Space") {
         event.preventDefault();
         void toggle();
@@ -258,6 +271,29 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
     }
   };
 
+  const startCaptions = async () => {
+    if (playing) void toggle();
+    const controller = new AbortController();
+    captionAbortRef.current = controller;
+    setCaptionState({ status: "running", message: "画面の変化を解析中…" });
+    try {
+      const captions = await generateCaptions({
+        doc,
+        src: source.url,
+        signal: controller.signal,
+        onProgress: (message) => setCaptionState({ status: "running", message }),
+      });
+      edit((current) => ({ ...current, captions }));
+      setCaptionState({ status: "idle" });
+    } catch (cause) {
+      if (cause instanceof DOMException && cause.name === "AbortError") {
+        setCaptionState({ status: "idle" });
+      } else {
+        setCaptionState({ status: "failed", message: messageOf(cause) });
+      }
+    }
+  };
+
   return (
     <main className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-3 p-4">
       <video ref={videoRef} src={source.url} playsInline preload="auto" className="hidden" />
@@ -270,7 +306,7 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
         <button type="button" className={BUTTON} disabled={!canRedo} onClick={redo}>
           やり直す
         </button>
-        <button type="button" className={BUTTON} disabled={exporting} onClick={onClose}>
+        <button type="button" className={BUTTON} disabled={exporting || generating} onClick={onClose}>
           閉じる
         </button>
         {exporting ? (
@@ -278,13 +314,14 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
             中止
           </button>
         ) : (
-          <button type="button" className={PRIMARY} onClick={startExport}>
+          <button type="button" className={PRIMARY} disabled={generating} onClick={startExport}>
             書き出す
           </button>
         )}
       </header>
 
       <ExportStatus state={exportState} />
+      <CaptionStatus state={captionState} />
 
       <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[minmax(0,1fr)_18rem]">
         <div className="flex min-w-0 flex-col gap-3">
@@ -293,7 +330,7 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
             width={OUTPUT_WIDTH}
             height={OUTPUT_HEIGHT}
             aria-label="プレビュー"
-            className="aspect-video max-h-[calc(100dvh-15rem)] w-full rounded-lg object-contain lg:min-h-64"
+            className="aspect-video max-h-[calc(100dvh-17rem)] w-full rounded-lg object-contain lg:min-h-64"
           />
 
           <div className="flex flex-wrap items-center gap-2">
@@ -344,6 +381,24 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
               >
                 ズーム
               </button>
+              {generating ? (
+                <button
+                  type="button"
+                  className={BUTTON}
+                  onClick={() => captionAbortRef.current?.abort()}
+                >
+                  生成を中止
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className={BUTTON}
+                  disabled={exporting}
+                  onClick={startCaptions}
+                >
+                  自動キャプション
+                </button>
+              )}
             </div>
           </div>
 
@@ -351,6 +406,7 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
             doc={doc}
             timeSec={timeSec}
             selectedZoomId={zoom?.id ?? null}
+            selectedCaptionId={caption?.id ?? null}
             onSeek={seek}
           />
         </div>
@@ -358,6 +414,7 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
         <Inspector
           doc={doc}
           zoom={zoom}
+          caption={caption}
           onLook={(patch) => edit((current) => ({ ...current, look: { ...current.look, ...patch } }))}
           onZoom={(patch) => {
             if (zoom) edit((current) => updateZoom(current, zoom.id, patch));
@@ -372,6 +429,12 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
           }}
           onZoomRemove={() => {
             if (zoom) edit((current) => removeZoom(current, zoom.id));
+          }}
+          onCaptionText={(text) => {
+            if (caption) edit((current) => updateCaption(current, caption.id, text));
+          }}
+          onCaptionRemove={() => {
+            if (caption) edit((current) => removeCaption(current, caption.id));
           }}
         />
       </div>
@@ -401,6 +464,24 @@ function ExportStatus({ state }: { state: ExportState }) {
     return (
       <p role="alert" className="text-sm text-danger">
         書き出しに失敗しました。{state.message}
+      </p>
+    );
+  }
+  return null;
+}
+
+function CaptionStatus({ state }: { state: CaptionState }) {
+  if (state.status === "running") {
+    return (
+      <p aria-live="polite" className="text-sm text-ink-2">
+        {state.message}
+      </p>
+    );
+  }
+  if (state.status === "failed") {
+    return (
+      <p role="alert" className="text-sm text-danger">
+        キャプションを生成できませんでした。{state.message}
       </p>
     );
   }
