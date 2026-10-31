@@ -13,15 +13,33 @@ const responseSchema = z.object({
   }),
 });
 
-// API キーを持つのはサーバ側だけ。他のサイトから課金 API を踏み台にされないよう同一オリジンに限る。
-function isSameOrigin(request: Request) {
+const LOCAL_HOSTNAMES = ["localhost", "127.0.0.1", "[::1]"];
+
+function isAllowedOrigin(origin: string) {
+  if (!URL.canParse(origin)) return false;
+  const url = new URL(origin);
+  return LOCAL_HOSTNAMES.includes(url.hostname) || url.origin === process.env.APP_ORIGIN;
+}
+
+function isAllowedHost(host: string) {
+  const { hostname } = new URL(`http://${host}`);
+  const appOrigin = process.env.APP_ORIGIN;
+  return (
+    LOCAL_HOSTNAMES.includes(hostname) || (!!appOrigin && new URL(appOrigin).host === host)
+  );
+}
+
+// API キーを持つのはサーバ側だけ。Origin と Host を比べるだけだと DNS リバインディングで
+// 攻撃者のサイトでも一致するので、サーバ側で決めた許可先と照合する。
+function isTrusted(request: Request) {
   const origin = request.headers.get("origin");
-  if (!origin) return false;
-  return URL.canParse(origin) && new URL(origin).host === request.headers.get("host");
+  const host = request.headers.get("host");
+  if (!origin || !host || !URL.canParse(`http://${host}`)) return false;
+  return isAllowedOrigin(origin) && isAllowedHost(host);
 }
 
 export async function POST(request: Request) {
-  if (!isSameOrigin(request)) return Response.json({ error: "forbidden" }, { status: 403 });
+  if (!isTrusted(request)) return Response.json({ error: "forbidden" }, { status: 403 });
 
   const apiKey = process.env.TYPESAFE_API_KEY;
   if (!apiKey) return Response.json({ error: "not_configured" }, { status: 503 });

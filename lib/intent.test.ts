@@ -2,8 +2,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { POST } from "../app/api/intent/route";
 import { classifyIntent, isChatter } from "./intent";
 
-function request(body: unknown, origin: string | null = "http://localhost:3001") {
-  const headers: Record<string, string> = { host: "localhost:3001" };
+function request(
+  body: unknown,
+  origin: string | null = "http://localhost:3001",
+  host = "localhost:3001",
+) {
+  const headers: Record<string, string> = { host };
   if (origin) headers.origin = origin;
   return new Request("http://localhost:3001/api/intent", {
     method: "POST",
@@ -37,6 +41,28 @@ describe("POST /api/intent", () => {
     vi.stubEnv("TYPESAFE_API_KEY", "test");
     expect((await POST(request({ text: "a" }, "https://evil.example"))).status).toBe(403);
     expect((await POST(request({ text: "a" }, null))).status).toBe(403);
+  });
+
+  it("rejects a DNS rebinding request where the origin matches the host", async () => {
+    vi.stubEnv("TYPESAFE_API_KEY", "test");
+    const rebound = request({ text: "a" }, "http://evil.example:3001", "evil.example:3001");
+    expect((await POST(rebound)).status).toBe(403);
+  });
+
+  it("rejects a forged local origin that arrives through a public host", async () => {
+    vi.stubEnv("TYPESAFE_API_KEY", "test");
+    const forged = request({ text: "a" }, "http://localhost:3001", "demovie.example");
+    expect((await POST(forged)).status).toBe(403);
+  });
+
+  it("allows a deployment only through APP_ORIGIN", async () => {
+    vi.stubEnv("TYPESAFE_API_KEY", "test");
+    vi.stubEnv("APP_ORIGIN", "https://demovie.example");
+    vi.stubGlobal("fetch", async () => jevReply(0.1));
+    const allowed = request({ text: "a" }, "https://demovie.example", "demovie.example");
+    expect((await POST(allowed)).status).toBe(200);
+    const other = request({ text: "a" }, "https://other.example", "other.example");
+    expect((await POST(other)).status).toBe(403);
   });
 
   it("reports a missing key", async () => {
