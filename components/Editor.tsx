@@ -42,6 +42,7 @@ import {
   zoomAt,
   zoomSpans,
 } from "@/lib/timeline";
+import { Assistant } from "./Assistant";
 import { Inspector } from "./Inspector";
 import { Steps } from "./Steps";
 import { Timeline } from "./Timeline";
@@ -514,6 +515,20 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
               )}
             </div>
           </div>
+
+          <Assistant
+            doc={doc}
+            timeSec={timeSec}
+            disabled={exporting || generating}
+            onListen={() => {
+              if (playing) void toggle();
+            }}
+            onApply={({ doc: next, seekSec }) => {
+              edit(() => next);
+              if (seekSec !== undefined) seek(seekSec);
+            }}
+            onUndo={undo}
+          />
 
           {timelineOpen ? (
             <>
