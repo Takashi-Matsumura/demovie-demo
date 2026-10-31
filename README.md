@@ -1,36 +1,71 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Demovie
 
-## Getting Started
+ソフトウェアの紹介や PC の操作説明の動画づくりを、生成 AI で手伝うブラウザアプリです。動画編集の知識は必要ありません。録画すると AI が操作の手順と説明文を下書きするので、担当者は文章を直すだけで動画を仕上げられます。
 
-First, run the development server:
+動画はブラウザの中で処理します。AI による手順の作成を使うと、フレーム画像が設定した VLM サーバへ送られます。既定の接続先は同じ PC の `127.0.0.1` です。
+
+> 開発中の MVP です。編集内容は使用中のブラウザに自動保存されます。シークレットウィンドウを閉じたり、サイトデータを消去したりすると失われます。
+
+## 機能
+
+- 画面録画、動画ファイルの読み込み、サンプル動画の生成
+- 動画の目的を手がかりにした、VLM による手順と説明文の自動作成
+- 手順の一覧での説明文の修正、並べ替え、映像ごとの削除
+- 倍率、中心、長さを指定できるズーム
+- 背景、余白、角丸、影の調整
+- 必要なときだけ開けるタイムラインでの微調整
+- 編集内容の自動保存と、続きからの再開
+- 1920×1080、30fps の動画書き出し（MP4。ブラウザが対応していなければ WebM）
+
+## 必要なもの
+
+- Node.js 20.9 以上
+- デスクトップ版の Chrome または Edge
+- AI による手順の作成を使う場合は、画像入力に対応したモデルを動かす [llama.cpp](https://github.com/ggml-org/llama.cpp) の `llama-server`
+
+## セットアップ
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+http://localhost:3000 を開きます。
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+画面録画は `localhost` か HTTPS で開いたときだけ使えます。
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### AI による手順の作成
 
-## Learn More
+画像入力に対応したモデルと、対応する mmproj ファイルで `llama-server` を起動します。既定の接続先は `http://127.0.0.1:8084` です。
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+llama-server -m <model>.gguf --mmproj <mmproj>.gguf --host 127.0.0.1 --port 8084
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+接続先を変える場合は、`.env.local` に次のように指定します。
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```bash
+NEXT_PUBLIC_VISION_URL=http://127.0.0.1:8084
+```
 
-## Deploy on Vercel
+外部のサーバを指定すると、動画のフレーム画像がそのサーバへ送信されます。ブラウザから直接呼び出すため、サーバ側で CORS の許可も必要です。
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+生成される説明文はモデルの推測を含みます。書き出す前に内容を確認してください。
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## 開発
+
+```bash
+npm run typecheck
+npm run lint
+npm test
+```
+
+## 謝辞
+
+Demovie の開発では、[OpenScreen](https://github.com/getopenscreen/openscreen) の機能やコンセプトを参考にしました。録画をデモ動画に仕上げるという体験を、オープンソースとして公開している OpenScreen の作者と貢献者のみなさんに感謝します。
+
+Demovie は独立したプロジェクトです。OpenScreen のコードや素材は使用しておらず、OpenScreen プロジェクトとは関係がありません。OpenScreen の公式プロジェクトや派生版ではなく、同プロジェクトから承認を受けたものでもありません。Demovie に関するお問い合わせを OpenScreen プロジェクトへ送らないようお願いします。
+
+## ライセンス
+
+[MIT License](./LICENSE)
