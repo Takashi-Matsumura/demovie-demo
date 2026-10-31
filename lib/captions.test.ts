@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { changedRatio, cleanCaption, findOperations, type Sample } from "./captions";
+import { buildPrompt, changedRatio, cleanCaption, findOperations, type Sample } from "./captions";
 
 function samples(ratios: number[]): Sample[] {
   return ratios.map((ratio, sec) => ({ sec, ratio }));
@@ -49,5 +49,12 @@ describe("cleanCaption", () => {
     expect(cleanCaption("  「ズームを設定」\n補足です")).toBe("ズームを設定");
     expect(cleanCaption("キャプション：設定を開く")).toBe("設定を開く");
     expect(cleanCaption("")).toBe("");
+  });
+});
+
+describe("buildPrompt", () => {
+  it("adds the purpose only when it is given", () => {
+    expect(buildPrompt("  経費精算の手順  ").startsWith("この動画の目的: 経費精算の手順\n")).toBe(true);
+    expect(buildPrompt("  ")).not.toContain("この動画の目的");
   });
 });

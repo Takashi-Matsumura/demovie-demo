@@ -3,6 +3,7 @@ import { createDocument, documentSchema, newId, type DemoDocument } from "./docu
 import {
   addCaption,
   addZoom,
+  applySteps,
   cameraAt,
   captionAt,
   captionBounds,
@@ -12,8 +13,10 @@ import {
   locate,
   moveClip,
   setCaptionRange,
+  setStepText,
   setZoomLength,
   splitAt,
+  stepSpans,
   totalDuration,
   zoomAt,
   zoomSpans,
@@ -192,6 +195,56 @@ describe("captions", () => {
     expect(captionTextAt(doc, clipId, 2.9)).toBeUndefined();
     expect(captionTextAt(doc, clipId, 3)).toBe("保存する");
     expect(captionTextAt(doc, clipId, 5)).toBeUndefined();
+  });
+});
+
+describe("steps", () => {
+  function caption(clipId: string, sourceStartSec: number, sourceEndSec: number, text: string) {
+    return { id: newId(), clipId, sourceStartSec, sourceEndSec, text };
+  }
+
+  it("cuts at each caption and keeps the text until the next one", () => {
+    const doc = makeDoc();
+    const clipId = doc.clips[0].id;
+    const steps = applySteps(doc, [caption(clipId, 2, 3, "開く"), caption(clipId, 6, 7, "保存")]);
+    expect(stepSpans(steps).map((step) => [step.startSec, step.endSec, step.caption?.text])).toEqual([
+      [0, 2, undefined],
+      [2, 6, "開く"],
+      [6, 10, "保存"],
+    ]);
+    expect(totalDuration(steps)).toBe(10);
+    expect(documentSchema.safeParse(steps).success).toBe(true);
+  });
+
+  it("does not leave a sliver when a caption starts at a clip edge", () => {
+    const doc = makeDoc();
+    const steps = applySteps(doc, [caption(doc.clips[0].id, 0, 2, "開く")]);
+    expect(steps.clips).toHaveLength(1);
+    expect(steps.captions[0].sourceEndSec).toBe(10);
+  });
+
+  it("replaces earlier captions and drops ones whose clip is gone", () => {
+    const base = makeDoc();
+    const doc = setStepText(base, base.clips[0].id, "古い説明");
+    expect(applySteps(doc, [caption("missing", 1, 2, "x")]).captions).toEqual([]);
+  });
+
+  it("creates a caption for a step without text, then updates it", () => {
+    const doc = splitAt(makeDoc(), 4);
+    const clipId = doc.clips[1].id;
+    const typed = setStepText(doc, clipId, "保存");
+    expect(typed.captions[0]).toMatchObject({ sourceStartSec: 4, sourceEndSec: 10 });
+    const changed = setStepText(typed, clipId, "保存します");
+    expect(changed.captions).toHaveLength(1);
+    expect(stepSpans(changed)[1].caption?.text).toBe("保存します");
+  });
+
+  it("removes the text and the video together when a step is deleted", () => {
+    const split = splitAt(makeDoc(), 4);
+    const named = setStepText(split, split.clips[1].id, "保存");
+    const deleted = deleteClip(named, split.clips[1].id);
+    expect(deleted.captions).toEqual([]);
+    expect(totalDuration(deleted)).toBe(4);
   });
 });
 

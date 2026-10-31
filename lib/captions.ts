@@ -17,10 +17,15 @@ const HOLD_SEC = 1.5;
 const END_MARGIN_SEC = 0.05;
 const FRAME_WIDTH = 1024;
 
-const PROMPT = `1枚目は操作の前、2枚目は操作の後の画面です。ユーザーが行った操作を、動画のキャプションとして日本語で1文にしてください。
-・「〜を設定」「〜を開く」のように30字以内の体言止めまたは動詞で終える
+const PROMPT = `1枚目は操作の前、2枚目は操作の後の画面です。ユーザーが行った操作を、操作説明動画の手順として日本語で1文にしてください。
+・「〜を開きます」「〜を設定します」のように、30字以内の丁寧語で書く
 ・画面に実際に見える文字を根拠にし、推測で固有名詞を足さない
-・キャプション本文だけを出力する`;
+・説明文だけを出力する`;
+
+export function buildPrompt(purpose: string) {
+  const context = purpose.trim();
+  return context ? `この動画の目的: ${context}\n${PROMPT}` : PROMPT;
+}
 
 export type Sample = { sec: number; ratio: number };
 export type Operation = { beforeSec: number; afterSec: number };
@@ -58,10 +63,12 @@ export function cleanCaption(reply: string) {
   return line.replace(/^(?:キャプション[:：]\s*)?[「『"]?|[」』"]$/g, "").trim();
 }
 
+// 分割済みのクリップでは境界そのものが操作なので、1 サンプル手前から比べる。
 function sampleTimes(clip: Clip) {
   const last = clip.sourceEndSec - END_MARGIN_SEC;
   const times: number[] = [];
-  for (let sec = clip.sourceStartSec; sec < last; sec += SAMPLE_SEC) times.push(sec);
+  const first = Math.max(0, clip.sourceStartSec - SAMPLE_SEC);
+  for (let sec = first; sec < last; sec += SAMPLE_SEC) times.push(sec);
   times.push(last);
   return times;
 }
@@ -82,7 +89,7 @@ function frameUrl(video: HTMLVideoElement) {
   return canvas.toDataURL("image/jpeg", 0.7);
 }
 
-async function describe(before: string, after: string, signal: AbortSignal) {
+async function describe(before: string, after: string, prompt: string, signal: AbortSignal) {
   const image = (url: string) => ({ type: "image_url", image_url: { url } });
   let response: Response;
   try {
@@ -94,7 +101,7 @@ async function describe(before: string, after: string, signal: AbortSignal) {
         messages: [
           {
             role: "user",
-            content: [image(before), image(after), { type: "text", text: PROMPT }],
+            content: [image(before), image(after), { type: "text", text: prompt }],
           },
         ],
         max_tokens: 80,
@@ -162,15 +169,10 @@ export async function generateCaptions({ doc, src, signal, onProgress }: Generat
       const before = frameUrl(video);
       const settled = operation.afterSec + SETTLE_SEC;
       await seekTo(video, Math.min(settled, clip.sourceEndSec - END_MARGIN_SEC));
-      const text = await describe(before, frameUrl(video), signal);
-      if (!text) continue;
-      captions.push({
-        id: newId(),
-        clipId: clip.id,
-        sourceStartSec: operation.beforeSec,
-        sourceEndSec: endSec,
-        text,
-      });
+      const text = await describe(before, frameUrl(video), buildPrompt(doc.purpose), signal);
+      const sourceStartSec = Math.max(operation.beforeSec, clip.sourceStartSec);
+      if (!text || endSec <= sourceStartSec) continue;
+      captions.push({ id: newId(), clipId: clip.id, sourceStartSec, sourceEndSec: endSec, text });
     }
     return captions;
   } finally {

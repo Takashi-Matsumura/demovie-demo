@@ -53,6 +53,7 @@ const assetSchema = z.object({
 export const documentSchema = z.object({
   schemaVersion: z.literal(SCHEMA_VERSION),
   asset: assetSchema,
+  purpose: z.string(),
   clips: z.array(clipSchema).min(1),
   zooms: z.array(zoomSchema),
   captions: z.array(captionSchema),
@@ -74,6 +75,7 @@ export function createDocument(asset: Asset): DemoDocument {
   return {
     schemaVersion: SCHEMA_VERSION,
     asset,
+    purpose: "",
     clips: [
       { id: newId(), sourceStartSec: 0, sourceEndSec: asset.durationSec },
     ],

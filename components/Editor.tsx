@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type ChangeEvent } from "react";
 import { generateCaptions } from "@/lib/captions";
-import { createDocument, type DemoDocument } from "@/lib/document";
+import { createDocument, newId, type DemoDocument } from "@/lib/document";
 import { exportVideo } from "@/lib/export";
 import {
   extensionFor,
@@ -11,10 +11,19 @@ import {
   startScreenRecording,
   type ScreenRecording,
 } from "@/lib/media";
+import {
+  createProject,
+  deleteProject,
+  listProjects,
+  loadProject,
+  saveProject,
+  type ProjectSummary,
+} from "@/lib/projects";
 import { OUTPUT_HEIGHT, OUTPUT_WIDTH } from "@/lib/render";
 import {
   addCaption,
   addZoom,
+  applySteps,
   captionAt,
   captionBounds,
   captionSpans,
@@ -24,6 +33,7 @@ import {
   removeCaption,
   removeZoom,
   setCaptionRange,
+  setStepText,
   setZoomLength,
   splitAt,
   totalDuration,
@@ -33,6 +43,7 @@ import {
   zoomSpans,
 } from "@/lib/timeline";
 import { Inspector } from "./Inspector";
+import { Steps } from "./Steps";
 import { Timeline } from "./Timeline";
 import { useDocument } from "./useDocument";
 import { usePlayer } from "./usePlayer";
@@ -42,7 +53,7 @@ const BUTTON =
 const PRIMARY =
   "rounded-md bg-accent px-3 py-1.5 text-sm font-medium whitespace-nowrap text-accent-ink transition-opacity duration-(--dur-fast) hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
 
-type Source = { url: string; name: string };
+type Source = { url: string; name: string; projectId: string };
 
 export function Editor() {
   const { doc, canUndo, canRedo, load, edit, undo, redo, reset } = useDocument();
@@ -54,11 +65,29 @@ export function Editor() {
       const url = URL.createObjectURL(blob);
       try {
         const info = await probeVideo(url);
-        load(createDocument({ name, ...info }));
-        setSource({ url, name });
+        const created = createDocument({ name, ...info });
+        const projectId = newId();
+        // 保存できなくても編集は続けられる。失敗は編集画面の保存表示で伝える。
+        await createProject(projectId, created, blob).catch(() => undefined);
+        load(created);
+        setSource({ url, name, projectId });
         setError(null);
       } catch (cause) {
         URL.revokeObjectURL(url);
+        setError(messageOf(cause));
+      }
+    },
+    [load],
+  );
+
+  const resume = useCallback(
+    async (projectId: string) => {
+      try {
+        const { doc: saved, video } = await loadProject(projectId);
+        load(saved);
+        setSource({ url: URL.createObjectURL(video), name: saved.asset.name, projectId });
+        setError(null);
+      } catch (cause) {
         setError(messageOf(cause));
       }
     },
@@ -71,7 +100,7 @@ export function Editor() {
   }, [source]);
 
   if (!doc || !source) {
-    return <StartScreen error={error} onError={setError} onOpen={openBlob} />;
+    return <StartScreen error={error} onError={setError} onOpen={openBlob} onResume={resume} />;
   }
 
   return (
@@ -95,9 +124,10 @@ type StartScreenProps = {
   error: string | null;
   onError: (message: string | null) => void;
   onOpen: (blob: Blob, name: string) => Promise<void>;
+  onResume: (projectId: string) => Promise<void>;
 };
 
-function StartScreen({ error, onError, onOpen }: StartScreenProps) {
+function StartScreen({ error, onError, onOpen, onResume }: StartScreenProps) {
   const [busy, setBusy] = useState<"sample" | null>(null);
   const [recording, setRecording] = useState<ScreenRecording | null>(null);
 
@@ -141,7 +171,7 @@ function StartScreen({ error, onError, onOpen }: StartScreenProps) {
         <div className="flex flex-col gap-3">
           <h1 className="text-4xl font-semibold tracking-tight">Demovie</h1>
           <p className="leading-7 text-ink-2">
-            録画に背景とズームを足して、見せられるデモ動画にします。動画はこの PC の中だけで処理し、外部には送信しません。
+            画面を録画すると、AI が操作の手順と説明文を下書きします。文章を直すだけで、説明動画が完成します。動画はこの PC の中だけで処理し、外部には送信しません。
           </p>
         </div>
 
@@ -181,8 +211,79 @@ function StartScreen({ error, onError, onOpen }: StartScreenProps) {
             {error}
           </p>
         )}
+
+        <RecentProjects onError={onError} onResume={onResume} />
       </div>
     </main>
+  );
+}
+
+type RecentProjectsProps = {
+  onError: (message: string | null) => void;
+  onResume: (projectId: string) => Promise<void>;
+};
+
+function RecentProjects({ onError, onResume }: RecentProjectsProps) {
+  const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  const [confirmingId, setConfirmingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    listProjects()
+      .then(setProjects)
+      .catch(() => onError("保存した作業の一覧を読み込めませんでした。"));
+  }, [onError]);
+
+  const remove = async (id: string) => {
+    try {
+      await deleteProject(id);
+      setProjects((current) => current.filter((project) => project.id !== id));
+    } catch (cause) {
+      onError(messageOf(cause));
+    }
+  };
+
+  if (projects.length === 0) return null;
+
+  return (
+    <section className="flex flex-col gap-2">
+      <h2 className="text-sm font-semibold">続きから編集</h2>
+      <ul className="flex flex-col gap-1">
+        {projects.map((project) => (
+          <li key={project.id} className="flex items-center gap-2 rounded-md bg-paper-2 px-3 py-2">
+            <button
+              type="button"
+              className="min-w-0 flex-1 text-left text-sm hover:underline"
+              onClick={() => void onResume(project.id)}
+            >
+              <span className="block truncate">{project.name}</span>
+              <span className="block font-mono text-xs text-ink-2 tabular-nums">
+                {new Date(project.updatedAt).toLocaleString("ja-JP")} · 手順 {project.stepCount} ·{" "}
+                {formatTime(project.durationSec)}
+              </span>
+            </button>
+            {confirmingId === project.id ? (
+              <button
+                type="button"
+                className="rounded px-2 py-1 text-sm text-danger hover:bg-paper-3"
+                onClick={() => void remove(project.id)}
+                onBlur={() => setConfirmingId(null)}
+              >
+                完全に削除
+              </button>
+            ) : (
+              <button
+                type="button"
+                aria-label={`${project.name} を削除`}
+                className="rounded px-2 py-1 text-sm text-ink-2 hover:bg-paper-3"
+                onClick={() => setConfirmingId(project.id)}
+              >
+                削除
+              </button>
+            )}
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
@@ -216,6 +317,8 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
   const { timeSec, playing, seek, toggle } = usePlayer(doc, videoRef, canvasRef);
   const [exportState, setExportState] = useState<ExportState>({ status: "idle" });
   const [captionState, setCaptionState] = useState<CaptionState>({ status: "idle" });
+  const [timelineOpen, setTimelineOpen] = useState(false);
+  const [saveFailed, setSaveFailed] = useState(false);
 
   // 編集対象のズームとキャプションは選択状態を持たず、再生位置から決める。
   const zoom = zoomAt(doc, timeSec)?.zoom ?? null;
@@ -225,6 +328,12 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
   const currentClip = locate(doc, timeSec).clip;
   const exporting = exportState.status === "running";
   const generating = captionState.status === "running";
+
+  useEffect(() => {
+    saveProject(source.projectId, doc)
+      .then(() => setSaveFailed(false))
+      .catch(() => setSaveFailed(true));
+  }, [doc, source.projectId]);
 
   useEffect(() => {
     if (exportState.status !== "done") return;
@@ -289,7 +398,7 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
         signal: controller.signal,
         onProgress: (message) => setCaptionState({ status: "running", message }),
       });
-      edit((current) => ({ ...current, captions }));
+      edit((current) => applySteps(current, captions));
       setCaptionState({ status: "idle" });
     } catch (cause) {
       if (cause instanceof DOMException && cause.name === "AbortError") {
@@ -305,7 +414,13 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
       <video ref={videoRef} src={source.url} playsInline preload="auto" className="hidden" />
 
       <header className="flex flex-wrap items-center gap-2">
-        <h1 className="mr-auto min-w-0 truncate text-sm font-semibold">{source.name}</h1>
+        <h1 className="min-w-0 truncate text-sm font-semibold">{source.name}</h1>
+        <span
+          role={saveFailed ? "alert" : undefined}
+          className={`mr-auto text-xs ${saveFailed ? "text-danger" : "text-ink-2"}`}
+        >
+          {saveFailed ? "保存できませんでした" : "自動保存"}
+        </span>
         <button type="button" className={BUTTON} disabled={!canUndo} onClick={undo}>
           元に戻す
         </button>
@@ -329,7 +444,17 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
       <ExportStatus state={exportState} />
       <CaptionStatus state={captionState} />
 
-      <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[minmax(0,1fr)_18rem]">
+      <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[20rem_minmax(0,1fr)] xl:grid-cols-[20rem_minmax(0,1fr)_16rem]">
+        <Steps
+          doc={doc}
+          currentClipId={currentClip.id}
+          onPurpose={(purpose) => edit((current) => ({ ...current, purpose }))}
+          onSelect={seek}
+          onText={(clipId, text) => edit((current) => setStepText(current, clipId, text))}
+          onMove={(clipId, delta) => edit((current) => moveClip(current, clipId, delta))}
+          onDelete={(clipId) => edit((current) => deleteClip(current, clipId))}
+        />
+
         <div className="flex min-w-0 flex-col gap-3">
           <canvas
             ref={canvasRef}
@@ -352,33 +477,7 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
                 className={BUTTON}
                 onClick={() => edit((current) => splitAt(current, timeSec))}
               >
-                分割
-              </button>
-              <button
-                type="button"
-                className={BUTTON}
-                disabled={doc.clips.length < 2}
-                onClick={() => edit((current) => deleteClip(current, currentClip.id))}
-              >
-                クリップ削除
-              </button>
-              <button
-                type="button"
-                aria-label="クリップを前へ移動"
-                className={BUTTON}
-                disabled={doc.clips[0].id === currentClip.id}
-                onClick={() => edit((current) => moveClip(current, currentClip.id, -1))}
-              >
-                ← 前へ
-              </button>
-              <button
-                type="button"
-                aria-label="クリップを後ろへ移動"
-                className={BUTTON}
-                disabled={doc.clips.at(-1)?.id === currentClip.id}
-                onClick={() => edit((current) => moveClip(current, currentClip.id, 1))}
-              >
-                後ろへ →
+                ここで手順を分ける
               </button>
               <button
                 type="button"
@@ -389,11 +488,11 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
               </button>
               <button
                 type="button"
+                aria-expanded={timelineOpen}
                 className={BUTTON}
-                disabled={generating || caption !== null}
-                onClick={() => edit((current) => addCaption(current, timeSec))}
+                onClick={() => setTimelineOpen((open) => !open)}
               >
-                キャプション
+                微調整
               </button>
               {generating ? (
                 <button
@@ -406,23 +505,47 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
               ) : (
                 <button
                   type="button"
-                  className={BUTTON}
+                  className={PRIMARY}
                   disabled={exporting}
                   onClick={startCaptions}
                 >
-                  自動キャプション
+                  AI で手順を作成
                 </button>
               )}
             </div>
           </div>
 
-          <Timeline
-            doc={doc}
-            timeSec={timeSec}
-            selectedZoomId={zoom?.id ?? null}
-            selectedCaptionId={caption?.id ?? null}
-            onSeek={seek}
-          />
+          {timelineOpen ? (
+            <>
+              <Timeline
+                doc={doc}
+                timeSec={timeSec}
+                selectedZoomId={zoom?.id ?? null}
+                selectedCaptionId={caption?.id ?? null}
+                onSeek={seek}
+              />
+              <div>
+                <button
+                  type="button"
+                  className={BUTTON}
+                  disabled={generating || caption !== null}
+                  onClick={() => edit((current) => addCaption(current, timeSec))}
+                >
+                  キャプションを追加
+                </button>
+              </div>
+            </>
+          ) : (
+            <input
+              type="range"
+              aria-label="再生位置"
+              value={timeSec}
+              min={0}
+              max={totalDuration(doc)}
+              step={0.1}
+              onChange={(event) => seek(Number(event.target.value))}
+            />
+          )}
         </div>
 
         <Inspector

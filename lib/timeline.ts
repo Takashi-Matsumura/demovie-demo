@@ -94,8 +94,7 @@ function splitRanges<T extends Zoom | Caption>(
   });
 }
 
-export function splitAt(doc: DemoDocument, timelineSec: number): DemoDocument {
-  const { clip, sourceSec } = locate(doc, timelineSec);
+function splitSource(doc: DemoDocument, clip: Clip, sourceSec: number): DemoDocument {
   if (
     sourceSec - clip.sourceStartSec < MIN_CLIP_SEC ||
     clip.sourceEndSec - sourceSec < MIN_CLIP_SEC
@@ -104,13 +103,73 @@ export function splitAt(doc: DemoDocument, timelineSec: number): DemoDocument {
   }
   const head: Clip = { ...clip, sourceEndSec: sourceSec };
   const tail: Clip = { id: newId(), sourceStartSec: sourceSec, sourceEndSec: clip.sourceEndSec };
-
   const clips = doc.clips.flatMap((item) => (item.id === clip.id ? [head, tail] : [item]));
   return {
     ...doc,
     clips,
     zooms: splitRanges(doc.zooms, clip.id, tail.id, sourceSec),
     captions: splitRanges(doc.captions, clip.id, tail.id, sourceSec),
+  };
+}
+
+export function splitAt(doc: DemoDocument, timelineSec: number): DemoDocument {
+  const { clip, sourceSec } = locate(doc, timelineSec);
+  return splitSource(doc, clip, sourceSec);
+}
+
+// ステップはクリップそのもの。削除や並べ替えは映像ごと動くようクリップの操作をそのまま使う。
+export function stepSpans(doc: DemoDocument) {
+  const captions = captionSpans(doc);
+  return clipSpans(doc).map((span) => ({
+    ...span,
+    caption:
+      captions
+        .filter(({ caption }) => caption.clipId === span.clip.id)
+        .sort((a, b) => a.startSec - b.startSec)[0]?.caption ?? null,
+  }));
+}
+
+export function setStepText(doc: DemoDocument, clipId: string, text: string): DemoDocument {
+  const step = stepSpans(doc).find((item) => item.clip.id === clipId);
+  if (!step) return doc;
+  if (step.caption) return updateCaption(doc, step.caption.id, text);
+  const caption: Caption = {
+    id: newId(),
+    clipId,
+    sourceStartSec: step.clip.sourceStartSec,
+    sourceEndSec: step.clip.sourceEndSec,
+    text,
+  };
+  return { ...doc, captions: [...doc.captions, caption] };
+}
+
+// 説明の始まりでクリップを分け、次の説明が始まるまで表示し続ける。
+export function applySteps(doc: DemoDocument, captions: Caption[]): DemoDocument {
+  let next: DemoDocument = {
+    ...doc,
+    captions: captions.filter((item) => doc.clips.some((clip) => clip.id === item.clipId)),
+  };
+  for (const { id } of next.captions) {
+    const caption = next.captions.find((item) => item.id === id);
+    const clip = next.clips.find((item) => item.id === caption?.clipId);
+    if (caption && clip) next = splitSource(next, clip, caption.sourceStartSec);
+  }
+  const { captions: placed, clips } = next;
+  return {
+    ...next,
+    captions: placed.map((caption) => {
+      const clip = clips.find((item) => item.id === caption.clipId);
+      const sourceEndSec = placed
+        .filter(
+          (item) =>
+            item.clipId === caption.clipId && item.sourceStartSec > caption.sourceStartSec,
+        )
+        .reduce(
+          (limit, item) => Math.min(limit, item.sourceStartSec),
+          clip?.sourceEndSec ?? caption.sourceEndSec,
+        );
+      return { ...caption, sourceEndSec };
+    }),
   };
 }
 
