@@ -13,13 +13,17 @@ import {
 } from "@/lib/media";
 import { OUTPUT_HEIGHT, OUTPUT_WIDTH } from "@/lib/render";
 import {
+  addCaption,
   addZoom,
   captionAt,
+  captionBounds,
+  captionSpans,
   deleteClip,
   locate,
   moveClip,
   removeCaption,
   removeZoom,
+  setCaptionRange,
   setZoomLength,
   splitAt,
   totalDuration,
@@ -215,7 +219,9 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
 
   // 編集対象のズームとキャプションは選択状態を持たず、再生位置から決める。
   const zoom = zoomAt(doc, timeSec)?.zoom ?? null;
-  const caption = captionAt(doc, timeSec)?.caption ?? null;
+  const captionSpan = captionAt(doc, timeSec) ?? null;
+  const caption = captionSpan?.caption ?? null;
+  const bounds = caption && captionBounds(doc, caption.id);
   const currentClip = locate(doc, timeSec).clip;
   const exporting = exportState.status === "running";
   const generating = captionState.status === "running";
@@ -381,6 +387,14 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
               >
                 ズーム
               </button>
+              <button
+                type="button"
+                className={BUTTON}
+                disabled={generating || caption !== null}
+                onClick={() => edit((current) => addCaption(current, timeSec))}
+              >
+                キャプション
+              </button>
               {generating ? (
                 <button
                   type="button"
@@ -414,7 +428,7 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
         <Inspector
           doc={doc}
           zoom={zoom}
-          caption={caption}
+          caption={captionSpan && bounds && { ...captionSpan, ...bounds }}
           onLook={(patch) => edit((current) => ({ ...current, look: { ...current.look, ...patch } }))}
           onZoom={(patch) => {
             if (zoom) edit((current) => updateZoom(current, zoom.id, patch));
@@ -432,6 +446,16 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
           }}
           onCaptionText={(text) => {
             if (caption) edit((current) => updateCaption(current, caption.id, text));
+          }}
+          onCaptionRange={(startSec, endSec) => {
+            if (!caption) return;
+            const next = setCaptionRange(doc, caption.id, startSec, endSec);
+            edit(() => next);
+            // 再生位置が外れるとパネルごと消えるので、区間の中へ戻す。
+            const span = captionSpans(next).find((item) => item.caption.id === caption.id);
+            if (span && (timeSec < span.startSec || timeSec >= span.endSec)) {
+              seek((span.startSec + span.endSec) / 2);
+            }
           }}
           onCaptionRemove={() => {
             if (caption) edit((current) => removeCaption(current, caption.id));

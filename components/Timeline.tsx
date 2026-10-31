@@ -89,7 +89,7 @@ export function Timeline({
             onPointerDown={(event) => event.stopPropagation()}
             onClick={() => onSeek((startSec + endSec) / 2)}
           >
-            {caption.text}
+            {caption.text || "（本文なし）"}
           </button>
         ))}
       </div>

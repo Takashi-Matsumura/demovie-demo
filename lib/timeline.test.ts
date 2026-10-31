@@ -1,14 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { createDocument, documentSchema, newId, type DemoDocument } from "./document";
 import {
+  addCaption,
   addZoom,
   cameraAt,
   captionAt,
+  captionBounds,
   captionSpans,
   captionTextAt,
   deleteClip,
   locate,
   moveClip,
+  setCaptionRange,
   setZoomLength,
   splitAt,
   totalDuration,
@@ -144,6 +147,43 @@ describe("captions", () => {
     const moved = moveClip(doc, doc.clips[1].id, -1);
     expect(captionAt(moved, 2)?.caption.text).toBe("保存する");
     expect(deleteClip(doc, doc.clips[1].id).captions).toEqual([]);
+  });
+
+  it("adds an empty caption at the playhead and stops at the next one", () => {
+    const doc = addCaption(withCaption(makeDoc(), 0, 3, 5), 1);
+    expect(doc.captions).toHaveLength(2);
+    expect(doc.captions[1]).toMatchObject({ sourceStartSec: 1, sourceEndSec: 3, text: "" });
+    expect(documentSchema.safeParse(doc).success).toBe(true);
+  });
+
+  it("refuses to add where there is no room", () => {
+    const taken = withCaption(makeDoc(), 0, 3, 5);
+    expect(addCaption(taken, 4)).toBe(taken);
+    expect(addCaption(taken, 2.9)).toBe(taken);
+    const doc = makeDoc();
+    expect(addCaption(doc, 9.9)).toBe(doc);
+  });
+
+  it("clamps a range to its neighbours and the clip", () => {
+    const doc = withCaption(withCaption(makeDoc(), 0, 1, 2), 0, 4, 5);
+    const { id } = doc.captions[1];
+    expect(captionBounds(doc, id)).toMatchObject({ minSec: 2, maxSec: 10 });
+    expect(setCaptionRange(doc, id, 0, 20).captions[1]).toMatchObject({
+      sourceStartSec: 2,
+      sourceEndSec: 10,
+    });
+    expect(setCaptionRange(doc, id, 4, 4.1)).toBe(doc);
+  });
+
+  it("takes timeline time after a reorder", () => {
+    const doc = withCaption(splitAt(makeDoc(), 4), 1, 5, 7);
+    const moved = moveClip(doc, doc.clips[1].id, -1);
+    const { id } = moved.captions[0];
+    expect(captionBounds(moved, id)).toMatchObject({ minSec: 0, maxSec: 6 });
+    expect(setCaptionRange(moved, id, 2, 4).captions[0]).toMatchObject({
+      sourceStartSec: 6,
+      sourceEndSec: 8,
+    });
   });
 
   it("finds the text by source time", () => {

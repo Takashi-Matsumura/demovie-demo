@@ -4,15 +4,24 @@ import { useState } from "react";
 import { BACKGROUND_IDS, type Caption, type DemoDocument, type Look, type Zoom } from "@/lib/document";
 import { BACKGROUNDS } from "@/lib/render";
 
+type CaptionPanel = {
+  caption: Caption;
+  startSec: number;
+  endSec: number;
+  minSec: number;
+  maxSec: number;
+};
+
 type InspectorProps = {
   doc: DemoDocument;
   zoom: Zoom | null;
-  caption: Caption | null;
+  caption: CaptionPanel | null;
   onLook: (patch: Partial<Look>) => void;
   onZoom: (patch: Partial<Pick<Zoom, "depth" | "focusX" | "focusY">>) => void;
   onZoomLength: (lengthSec: number) => void;
   onZoomRemove: () => void;
   onCaptionText: (text: string) => void;
+  onCaptionRange: (startSec: number, endSec: number) => void;
   onCaptionRemove: () => void;
 };
 
@@ -57,6 +66,7 @@ export function Inspector({
   onZoomLength,
   onZoomRemove,
   onCaptionText,
+  onCaptionRange,
   onCaptionRemove,
 }: InspectorProps) {
   const { look } = doc;
@@ -202,8 +212,27 @@ export function Inspector({
             aria-label="キャプションの本文"
             rows={3}
             className="w-full resize-none rounded bg-paper-3 p-2 text-sm"
-            value={caption.text}
+            placeholder="本文を入力"
+            value={caption.caption.text}
             onChange={(event) => onCaptionText(event.target.value)}
+          />
+          <Slider
+            label="開始"
+            value={caption.startSec}
+            min={caption.minSec}
+            max={caption.endSec - 0.3}
+            step={0.1}
+            unit="秒"
+            onChange={(startSec) => onCaptionRange(startSec, caption.endSec)}
+          />
+          <Slider
+            label="長さ"
+            value={caption.endSec - caption.startSec}
+            min={0.3}
+            max={caption.maxSec - caption.startSec}
+            step={0.1}
+            unit="秒"
+            onChange={(lengthSec) => onCaptionRange(caption.startSec, caption.startSec + lengthSec)}
           />
         </section>
       )}
