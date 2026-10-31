@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { buildPrompt, changedRatio, cleanCaption, findOperations, type Sample } from "./captions";
+import {
+  buildPrompt,
+  changedRatio,
+  changedRegion,
+  cleanCaption,
+  findOperations,
+  suggestZoom,
+  type Sample,
+} from "./captions";
 
 function samples(ratios: number[]): Sample[] {
   return ratios.map((ratio, sec) => ({ sec, ratio }));
@@ -56,5 +64,61 @@ describe("buildPrompt", () => {
   it("adds the purpose only when it is given", () => {
     expect(buildPrompt("  経費精算の手順  ").startsWith("この動画の目的: 経費精算の手順\n")).toBe(true);
     expect(buildPrompt("  ")).not.toContain("この動画の目的");
+  });
+});
+
+describe("changedRegion", () => {
+  const WIDTH = 10;
+  const blank = () => new Uint8ClampedArray(100);
+  function withCells(cells: [number, number][]) {
+    const frame = blank();
+    cells.forEach(([x, y]) => {
+      frame[y * WIDTH + x] = 255;
+    });
+    return frame;
+  }
+
+  it("returns nothing when too little changed", () => {
+    expect(changedRegion(blank(), blank(), WIDTH)).toBeNull();
+  });
+
+  it("measures the changed cells as ratios", () => {
+    const cells: [number, number][] = [
+      [2, 6],
+      [3, 6],
+      [2, 7],
+      [3, 7],
+    ];
+    expect(changedRegion(blank(), withCells(cells), WIDTH)).toEqual({
+      centerX: 0.3,
+      centerY: 0.7,
+      width: 0.2,
+      height: 0.2,
+    });
+  });
+
+  it("ignores a stray change far from the rest", () => {
+    const cluster = [7, 8, 9].flatMap((y) =>
+      [0, 1, 2, 3].map((x): [number, number] => [x, y]),
+    );
+    const stray: [number, number][] = [[9, 0]];
+    const region = changedRegion(blank(), withCells([...cluster, ...stray]), WIDTH);
+    expect(region?.width).toBeLessThanOrEqual(0.4);
+    expect(region?.centerX).toBeLessThan(0.3);
+  });
+});
+
+describe("suggestZoom", () => {
+  const region = (size: number) => ({ centerX: 0.3, centerY: 0.7, width: size, height: size });
+
+  it("does not zoom without a region or on a full screen change", () => {
+    expect(suggestZoom(null)).toBeNull();
+    expect(suggestZoom(region(0.9))).toBeNull();
+  });
+
+  it("frames the change within the depth limits", () => {
+    expect(suggestZoom(region(0.4))).toEqual({ depth: 2, focusX: 0.3, focusY: 0.7 });
+    expect(suggestZoom(region(0.05))?.depth).toBe(2.2);
+    expect(suggestZoom(region(0.6))?.depth).toBe(1.3);
   });
 });

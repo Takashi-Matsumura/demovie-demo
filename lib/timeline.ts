@@ -144,10 +144,24 @@ export function setStepText(doc: DemoDocument, clipId: string, text: string): De
 }
 
 // 説明の始まりでクリップを分け、次の説明が始まるまで表示し続ける。
-export function applySteps(doc: DemoDocument, captions: Caption[]): DemoDocument {
+// 手動のズームは残し、重なる提案は捨てる。
+export function applySteps(
+  doc: DemoDocument,
+  captions: Caption[],
+  zooms: Zoom[] = [],
+): DemoDocument {
+  const hasClip = (item: Caption | Zoom) => doc.clips.some((clip) => clip.id === item.clipId);
+  const isFree = (zoom: Zoom) =>
+    !doc.zooms.some(
+      (item) =>
+        item.clipId === zoom.clipId &&
+        item.sourceStartSec < zoom.sourceEndSec &&
+        zoom.sourceStartSec < item.sourceEndSec,
+    );
   let next: DemoDocument = {
     ...doc,
-    captions: captions.filter((item) => doc.clips.some((clip) => clip.id === item.clipId)),
+    captions: captions.filter(hasClip),
+    zooms: [...doc.zooms, ...zooms.filter(hasClip).filter(isFree)],
   };
   for (const { id } of next.captions) {
     const caption = next.captions.find((item) => item.id === id);
