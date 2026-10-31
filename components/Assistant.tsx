@@ -4,15 +4,22 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
 import { interpret } from "@/lib/assistant";
 import { applyCommands, type CommandResult } from "@/lib/commands";
 import type { DemoDocument } from "@/lib/document";
+import { classifyIntent } from "@/lib/intent";
 import { startRecording, toWav, transcribe, type VoiceRecording } from "@/lib/speech";
 
-type Phase = "idle" | "recording" | "transcribing" | "thinking";
+type Phase = "idle" | "recording" | "transcribing" | "classifying" | "thinking";
 
-type Reply = { heard: string; tone: "done" | "question" | "failed"; message: string };
+type Reply = {
+  heard: string;
+  tone: "done" | "question" | "failed" | "ignored";
+  message: string;
+  startSec?: number;
+};
 
 const PHASE_LABEL: Record<Exclude<Phase, "idle">, string> = {
   recording: "聞いています…",
   transcribing: "文字にしています…",
+  classifying: "指示かどうかを確認しています…",
   thinking: "AI が操作を考えています…",
 };
 
@@ -122,6 +129,20 @@ export function Assistant({ doc, timeSec, disabled, onListen, onApply, onUndo }:
           : new Error("音声を聞き取れませんでした。もう少し長く話してください。");
       });
       if (!transcript) throw new Error("音声を聞き取れませんでした。もう一度話してください。");
+      // 聞き返しへの返事は「はい」のように短く、単独では指示に見えないので判定しない。
+      if (!questionRef.current) {
+        setPhase("classifying");
+        if ((await classifyIntent(transcript, signal)) === "chatter") {
+          setApplied(false);
+          setReply({
+            heard: transcript,
+            tone: "ignored",
+            message: "指示ではないと判断しました。",
+            startSec,
+          });
+          return;
+        }
+      }
       await run(transcript, startSec, signal);
     });
   }, [handle, run]);
@@ -200,6 +221,19 @@ export function Assistant({ doc, timeSec, disabled, onListen, onApply, onUndo }:
           <span className={reply.tone === "failed" ? "text-danger" : "text-ink"}>
             {reply.message}
           </span>
+          {reply.tone === "ignored" && (
+            <button
+              type="button"
+              className="text-accent underline"
+              onClick={() => {
+                const { heard, startSec = latestRef.current.timeSec } = reply;
+                setReply(null);
+                void handle((signal) => run(heard, startSec, signal));
+              }}
+            >
+              指示として実行
+            </button>
+          )}
           {reply.tone === "done" && applied && (
             <button
               type="button"

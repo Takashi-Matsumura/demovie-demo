@@ -172,7 +172,7 @@ function StartScreen({ error, onError, onOpen, onResume }: StartScreenProps) {
         <div className="flex flex-col gap-3">
           <h1 className="text-4xl font-semibold tracking-tight">Demovie</h1>
           <p className="leading-7 text-ink-2">
-            画面を録画すると、AI が操作の手順と説明文を下書きします。文章を直すだけで、説明動画が完成します。動画はこの PC の中だけで処理し、外部には送信しません。
+            画面を録画すると、AI が操作の手順と説明文を下書きします。文章を直すだけで、説明動画が完成します。動画はこの PC の中だけで処理します。音声の指示は、設定している場合のみ、文字にした内容を判定サービスへ送ります。
           </p>
         </div>
 
