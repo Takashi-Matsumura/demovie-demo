@@ -392,13 +392,13 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
     captionAbortRef.current = controller;
     setCaptionState({ status: "running", message: "画面の変化を解析中…" });
     try {
-      const captions = await generateCaptions({
+      const { captions, zooms } = await generateCaptions({
         doc,
         src: source.url,
         signal: controller.signal,
         onProgress: (message) => setCaptionState({ status: "running", message }),
       });
-      edit((current) => applySteps(current, captions));
+      edit((current) => applySteps(current, captions, zooms));
       setCaptionState({ status: "idle" });
     } catch (cause) {
       if (cause instanceof DOMException && cause.name === "AbortError") {

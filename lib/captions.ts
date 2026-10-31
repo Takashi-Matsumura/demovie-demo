@@ -1,4 +1,4 @@
-import { newId, type Caption, type Clip, type DemoDocument } from "./document";
+import { newId, type Caption, type Clip, type DemoDocument, type Zoom } from "./document";
 import { seekTo, waitForEvent } from "./media";
 
 // 手元の llama-server を直接呼ぶ。動画のフレームはこの PC の外へは出ない。
@@ -16,6 +16,14 @@ const SETTLE_SEC = 0.5;
 const HOLD_SEC = 1.5;
 const END_MARGIN_SEC = 0.05;
 const FRAME_WIDTH = 1024;
+// 外れ値を落とす割合。離れた場所のカーソル移動で範囲が広がるのを防ぐ。
+const REGION_TRIM = 0.1;
+// これより広い変化は画面遷移とみなし、拡大しない。
+const MAX_ZOOM_REGION = 0.6;
+const MIN_ZOOM_DEPTH = 1.3;
+const MAX_ZOOM_DEPTH = 2.2;
+const REGION_FILL = 0.8;
+const MIN_AUTO_ZOOM_SEC = 1;
 
 const PROMPT = `1枚目は操作の前、2枚目は操作の後の画面です。ユーザーが行った操作を、操作説明動画の手順として日本語で1文にしてください。
 ・「〜を開きます」「〜を設定します」のように、30字以内の丁寧語で書く
@@ -36,6 +44,47 @@ export function changedRatio(previous: Uint8ClampedArray, current: Uint8ClampedA
     if (Math.abs(current[index] - previous[index]) > PIXEL_THRESHOLD) changed += 1;
   }
   return changed / current.length;
+}
+
+export type Region = { centerX: number; centerY: number; width: number; height: number };
+
+// 変化したマスの範囲を 0〜1 の比率で返す。
+export function changedRegion(
+  previous: Uint8ClampedArray,
+  current: Uint8ClampedArray,
+  width: number,
+): Region | null {
+  const xs: number[] = [];
+  const ys: number[] = [];
+  for (let index = 0; index < current.length; index += 1) {
+    if (Math.abs(current[index] - previous[index]) <= PIXEL_THRESHOLD) continue;
+    xs.push(index % width);
+    ys.push(Math.floor(index / width));
+  }
+  if (xs.length / current.length < CHANGE_RATIO) return null;
+
+  const height = current.length / width;
+  const range = (values: number[], size: number) => {
+    const sorted = [...values].sort((a, b) => a - b);
+    const trim = Math.floor(sorted.length * REGION_TRIM);
+    const from = sorted[trim];
+    const to = sorted[sorted.length - 1 - trim] + 1;
+    return { center: (from + to) / 2 / size, length: (to - from) / size };
+  };
+  const x = range(xs, width);
+  const y = range(ys, height);
+  return { centerX: x.center, centerY: y.center, width: x.length, height: y.length };
+}
+
+export function suggestZoom(region: Region | null) {
+  if (!region || Math.max(region.width, region.height) > MAX_ZOOM_REGION) return null;
+  const fit = REGION_FILL / Math.max(region.width, region.height);
+  const depth = Math.min(MAX_ZOOM_DEPTH, Math.max(MIN_ZOOM_DEPTH, fit));
+  return {
+    depth: Math.round(depth * 10) / 10,
+    focusX: region.centerX,
+    focusY: region.centerY,
+  };
 }
 
 // 続けて変化したサンプルは 1 つの操作にまとめる。入力やスクロールで細切れにしないため。
@@ -162,19 +211,26 @@ export async function generateCaptions({ doc, src, signal, onProgress }: Generat
     if (found.length === 0) throw new Error("画面の変化が見つかりませんでした。");
 
     const captions: Caption[] = [];
+    const zooms: Zoom[] = [];
     for (const [index, { clip, operation, endSec }] of found.entries()) {
       signal.throwIfAborted();
       onProgress(`キャプションを生成中 ${index + 1} / ${found.length}`);
       await seekTo(video, operation.beforeSec);
       const before = frameUrl(video);
+      const beforeSignature: Uint8ClampedArray = signatureOf(ctx, video);
       const settled = operation.afterSec + SETTLE_SEC;
       await seekTo(video, Math.min(settled, clip.sourceEndSec - END_MARGIN_SEC));
+      const region = changedRegion(beforeSignature, signatureOf(ctx, video), SIGNATURE_WIDTH);
       const text = await describe(before, frameUrl(video), buildPrompt(doc.purpose), signal);
       const sourceStartSec = Math.max(operation.beforeSec, clip.sourceStartSec);
       if (!text || endSec <= sourceStartSec) continue;
       captions.push({ id: newId(), clipId: clip.id, sourceStartSec, sourceEndSec: endSec, text });
+      const zoom = suggestZoom(region);
+      if (zoom && endSec - sourceStartSec >= MIN_AUTO_ZOOM_SEC) {
+        zooms.push({ id: newId(), clipId: clip.id, sourceStartSec, sourceEndSec: endSec, ...zoom });
+      }
     }
-    return captions;
+    return { captions, zooms };
   } finally {
     video.removeAttribute("src");
     video.load();

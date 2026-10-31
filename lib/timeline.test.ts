@@ -229,6 +229,32 @@ describe("steps", () => {
     expect(applySteps(doc, [caption("missing", 1, 2, "x")]).captions).toEqual([]);
   });
 
+  it("skips a suggested zoom that overlaps a manual one", () => {
+    const { doc } = withZoom(makeDoc(), 1);
+    const clipId = doc.clips[0].id;
+    const zoom = (sourceStartSec: number, sourceEndSec: number) => ({
+      id: newId(),
+      clipId,
+      sourceStartSec,
+      sourceEndSec,
+      depth: 2,
+      focusX: 0.5,
+      focusY: 0.5,
+    });
+    const steps = applySteps(
+      doc,
+      [caption(clipId, 2, 3, "開く"), caption(clipId, 6, 7, "保存")],
+      [zoom(2, 3), zoom(6, 7)],
+    );
+    expect(zoomSpans(steps).map(({ startSec, endSec }) => [startSec, endSec])).toEqual([
+      [1, 2],
+      [2, 3],
+      [6, 7],
+    ]);
+    expect(steps.zooms).toHaveLength(3);
+    expect(documentSchema.safeParse(steps).success).toBe(true);
+  });
+
   it("creates a caption for a step without text, then updates it", () => {
     const doc = splitAt(makeDoc(), 4);
     const clipId = doc.clips[1].id;
