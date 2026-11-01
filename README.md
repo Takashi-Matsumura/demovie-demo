@@ -97,6 +97,8 @@ npm run lint
 npm test
 ```
 
+PR と `main` への push では、GitHub Actions が同じ確認と本番ビルドを実行します。
+
 ## 謝辞
 
 Demovie の開発では、[OpenScreen](https://github.com/getopenscreen/openscreen) の機能やコンセプトを参考にしました。録画をデモ動画に仕上げるという体験を、オープンソースとして公開している OpenScreen の作者と貢献者のみなさんに感謝します。
