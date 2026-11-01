@@ -352,6 +352,7 @@ export function addBlur(doc: DemoDocument, rect: BlurRect): DemoDocument {
     id: newId(),
     sourceStartSec: 0,
     sourceEndSec: doc.asset.durationSec,
+    style: "mosaic",
     ...rect,
   };
   return { ...doc, blurs: [...doc.blurs, blur] };
@@ -368,6 +369,17 @@ export function setBlurRange(
     blurs: doc.blurs.map((item) =>
       item.id === blurId ? { ...item, sourceStartSec, sourceEndSec } : item,
     ),
+  };
+}
+
+export function setBlurStyle(
+  doc: DemoDocument,
+  blurId: string,
+  style: Blur["style"],
+): DemoDocument {
+  return {
+    ...doc,
+    blurs: doc.blurs.map((item) => (item.id === blurId ? { ...item, style } : item)),
   };
 }
 

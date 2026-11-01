@@ -42,6 +42,7 @@ import {
   removeCaption,
   removeZoom,
   setBlurRange,
+  setBlurStyle,
   setCaptionRange,
   setStepText,
   setZoomLength,
@@ -704,6 +705,7 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
                 : setBlurRange(current, blurId, sourceStartSec, sourceEndSec),
             );
           }}
+          onBlurStyle={(blurId, style) => edit((current) => setBlurStyle(current, blurId, style))}
           onBlurRemove={(blurId) => edit((current) => removeBlur(current, blurId))}
           onLook={(patch) => edit((current) => ({ ...current, look: { ...current.look, ...patch } }))}
           onZoom={(patch) => {
