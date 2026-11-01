@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createDocument, documentSchema, newId, type DemoDocument } from "./document";
+import { mosaicGrid } from "./render";
 import {
   addBlur,
   addCaption,
@@ -302,8 +303,22 @@ describe("blurs", () => {
     const narrowed = setBlurRange(doc, id, 2, 4);
     expect(blursAt(narrowed, 1)).toEqual([]);
     expect(blursAt(narrowed, 2)).toHaveLength(1);
-    expect(blursAt(narrowed, 4)).toEqual([]);
+    expect(blursAt(narrowed, 4.1)).toEqual([]);
     expect(removeBlur(doc, id).blurs).toEqual([]);
+  });
+
+  it("covers the frames at both ends of its range", () => {
+    const doc = addBlur(makeDoc(), rect);
+    const { id } = doc.blurs[0];
+    expect(blursAt(doc, doc.asset.durationSec)).toHaveLength(1);
+    const narrowed = setBlurRange(doc, id, 2, 4);
+    expect(blursAt(narrowed, 4)).toHaveLength(1);
+    expect(blursAt(narrowed, 1.98)).toHaveLength(1);
+  });
+
+  it("sizes mosaic blocks by the recording, not the zoomed output", () => {
+    expect(mosaicGrid(380, 100, 1920)).toEqual({ columns: 10, rows: 3 });
+    expect(mosaicGrid(5, 5, 1920)).toEqual({ columns: 1, rows: 1 });
   });
 
   it("opens work saved before blurs existed", () => {

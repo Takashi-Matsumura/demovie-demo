@@ -16,6 +16,7 @@ export const BACKGROUNDS: Record<
 };
 
 // 文字を読み取れないよう、1 ブロックを本文の文字より大きくする。
+// 大きさは録画の幅が基準。出力側で決めると、ズームするほど元の映像の情報が残る。
 const MOSAIC_BLOCK_RATIO = 0.02;
 
 type Rect = { x: number; y: number; width: number; height: number };
@@ -64,6 +65,15 @@ export function previewToVideo(
   };
 }
 
+// ブロックの区切りは録画の座標に固定する。ズームで動くと、コマを重ねて元の内容を推測されやすい。
+export function mosaicGrid(blurWidth: number, blurHeight: number, videoWidth: number) {
+  const block = videoWidth * MOSAIC_BLOCK_RATIO;
+  return {
+    columns: Math.max(1, Math.ceil(blurWidth / block)),
+    rows: Math.max(1, Math.ceil(blurHeight / block)),
+  };
+}
+
 let mosaicCanvas: HTMLCanvasElement | null = null;
 
 function drawBlurs(
@@ -79,32 +89,38 @@ function drawBlurs(
   mosaicCanvas ??= document.createElement("canvas");
   const mosaic = mosaicCanvas.getContext("2d");
   if (!mosaic) return;
-  const block = ctx.canvas.width * MOSAIC_BLOCK_RATIO;
   const scale = frame.width / crop.width;
 
   for (const blur of blursAt(doc, sourceSec)) {
-    const left = Math.max(blur.x * vw, crop.x);
-    const top = Math.max(blur.y * vh, crop.y);
-    const right = Math.min((blur.x + blur.width) * vw, crop.x + crop.width);
-    const bottom = Math.min((blur.y + blur.height) * vh, crop.y + crop.height);
+    const blurX = blur.x * vw;
+    const blurY = blur.y * vh;
+    const blurWidth = blur.width * vw;
+    const blurHeight = blur.height * vh;
+    const left = Math.max(blurX, crop.x);
+    const top = Math.max(blurY, crop.y);
+    const right = Math.min(blurX + blurWidth, crop.x + crop.width);
+    const bottom = Math.min(blurY + blurHeight, crop.y + crop.height);
     if (right <= left || bottom <= top) continue;
 
-    const destWidth = (right - left) * scale;
-    const destHeight = (bottom - top) * scale;
-    const columns = Math.max(1, Math.ceil(destWidth / block));
-    const rows = Math.max(1, Math.ceil(destHeight / block));
+    const { columns, rows } = mosaicGrid(blurWidth, blurHeight, vw);
     mosaicCanvas.width = columns;
     mosaicCanvas.height = rows;
-    mosaic.drawImage(video, left, top, right - left, bottom - top, 0, 0, columns, rows);
+    mosaic.drawImage(video, blurX, blurY, blurWidth, blurHeight, 0, 0, columns, rows);
 
+    const toColumns = columns / blurWidth;
+    const toRows = rows / blurHeight;
     ctx.save();
     ctx.imageSmoothingEnabled = false;
     ctx.drawImage(
       mosaicCanvas,
+      (left - blurX) * toColumns,
+      (top - blurY) * toRows,
+      (right - left) * toColumns,
+      (bottom - top) * toRows,
       frame.x + (left - crop.x) * scale,
       frame.y + (top - crop.y) * scale,
-      destWidth,
-      destHeight,
+      (right - left) * scale,
+      (bottom - top) * scale,
     );
     ctx.restore();
   }

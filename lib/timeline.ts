@@ -9,6 +9,7 @@ const MIN_CAPTION_SEC = 0.3;
 const DEFAULT_CAPTION_SEC = 3;
 const MIN_CLIP_SEC = 0.05;
 const RAMP_SEC = 0.4;
+const BLUR_MARGIN_SEC = 1 / 30;
 
 export type ClipSpan = { clip: Clip; startSec: number; endSec: number };
 
@@ -374,9 +375,12 @@ export function removeBlur(doc: DemoDocument, blurId: string): DemoDocument {
   return { ...doc, blurs: doc.blurs.filter((item) => item.id !== blurId) };
 }
 
+// 書き出しでは終了時刻ちょうどのコマも描く。隠し損ねないよう、両端を 1 コマ分広げる。
 export function blursAt(doc: DemoDocument, sourceSec: number) {
   return doc.blurs.filter(
-    (item) => sourceSec >= item.sourceStartSec && sourceSec < item.sourceEndSec,
+    (item) =>
+      sourceSec >= item.sourceStartSec - BLUR_MARGIN_SEC &&
+      sourceSec <= item.sourceEndSec + BLUR_MARGIN_SEC,
   );
 }
 
