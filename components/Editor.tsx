@@ -528,6 +528,10 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
               if (seekSec !== undefined) seek(seekSec);
             }}
             onUndo={undo}
+            onStartReview={() => {
+              seek(0);
+              void toggle();
+            }}
           />
 
           {timelineOpen ? (

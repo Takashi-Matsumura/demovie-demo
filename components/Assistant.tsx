@@ -2,11 +2,13 @@
 
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { interpret, tidyNarration } from "@/lib/assistant";
-import { applyCommands, type CommandResult } from "@/lib/commands";
-import type { DemoDocument } from "@/lib/document";
+import { applyCommands, type Command, type CommandResult } from "@/lib/commands";
+import { newId, type DemoDocument } from "@/lib/document";
 import { classifyIntent } from "@/lib/intent";
+import { applyReview, timelineAt } from "@/lib/review";
 import { startRecording, toWav, transcribe, type VoiceRecording } from "@/lib/speech";
 import { locate } from "@/lib/timeline";
+import { ReviewPanel, type ReviewItem, type ReviewStage } from "./ReviewPanel";
 
 type Phase = "idle" | "recording" | "transcribing" | "classifying" | "thinking" | "tidying";
 
@@ -36,14 +38,30 @@ type AssistantProps = {
   onListen: () => void;
   onApply: (result: Extract<CommandResult, { kind: "applied" }>) => void;
   onUndo: () => void;
+  onStartReview: () => void;
 };
 
-export function Assistant({ doc, timeSec, disabled, onListen, onApply, onUndo }: AssistantProps) {
+export function Assistant({
+  doc,
+  timeSec,
+  disabled,
+  onListen,
+  onApply,
+  onUndo,
+  onStartReview,
+}: AssistantProps) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [reply, setReply] = useState<Reply | null>(null);
   const [text, setText] = useState("");
   const [applied, setApplied] = useState(false);
   const [mode, setMode] = useState<Mode>("instruct");
+  const [reviewStage, setReviewStage] = useState<ReviewStage | null>(null);
+  const [reviewItems, setReviewItems] = useState<ReviewItem[]>([]);
+  const reviewStageRef = useRef<ReviewStage | null>(null);
+  const reviewItemsRef = useRef<ReviewItem[]>([]);
+  const reviewCommandsRef = useRef(new Map<string, Command[]>());
+  const reviewPendingRef = useRef<Promise<void>[]>([]);
+  const reviewControllerRef = useRef<AbortController | null>(null);
   const recordingRef = useRef<Promise<VoiceRecording> | null>(null);
   const modeRef = useRef<Mode>("instruct");
   const startSecRef = useRef(0);
@@ -102,10 +120,48 @@ export function Assistant({ doc, timeSec, disabled, onListen, onApply, onUndo }:
   }, []);
 
   // 説明文は見ながら話せるよう再生を止めず、話し始めた時点の手順に入れる。
+  const updateReviewItems = useCallback((change: (items: ReviewItem[]) => ReviewItem[]) => {
+    reviewItemsRef.current = change(reviewItemsRef.current);
+    setReviewItems(reviewItemsRef.current);
+  }, []);
+
+  const setStage = useCallback((stage: ReviewStage | null) => {
+    reviewStageRef.current = stage;
+    setReviewStage(stage);
+  }, []);
+
+  const captureReviewItem = useCallback(
+    async (id: string, started: Promise<VoiceRecording>, signal: AbortSignal) => {
+      const patch = (values: Partial<ReviewItem>) =>
+        updateReviewItems((items) =>
+          items.map((item) => (item.id === id ? { ...item, ...values } : item)),
+        );
+      try {
+        const recording = await started;
+        const transcript = await transcribe(await toWav(await recording.stop()), signal);
+        if (!transcript) {
+          updateReviewItems((items) => items.filter((item) => item.id !== id));
+          return;
+        }
+        patch({ transcript });
+        patch({ state: await classifyIntent(transcript, signal) });
+      } catch {
+        if (!signal.aborted) patch({ state: "failed", summary: "聞き取れませんでした。" });
+      }
+    },
+    [updateReviewItems],
+  );
+
   const startListening = useCallback(
     (nextMode: Mode) => {
     if (recordingRef.current || disabled) return;
-    if (nextMode === "instruct") onListen();
+    if (nextMode === "instruct" && reviewStageRef.current === "listening") {
+      // 通しの確認では再生を止めない。
+    } else if (reviewStageRef.current) {
+      return;
+    } else if (nextMode === "instruct") {
+      onListen();
+    }
     modeRef.current = nextMode;
     setMode(nextMode);
     startSecRef.current = latestRef.current.timeSec;
@@ -135,6 +191,26 @@ export function Assistant({ doc, timeSec, disabled, onListen, onApply, onUndo }:
     recordingRef.current = null;
     const startSec = startSecRef.current;
     const dictating = modeRef.current === "dictate";
+    if (reviewStageRef.current === "listening" && reviewControllerRef.current) {
+      const { doc: current } = latestRef.current;
+      const { index, sourceSec } = locate(current, startSec);
+      const item: ReviewItem = {
+        id: newId(),
+        sourceSec,
+        label: `手順 ${index + 1}`,
+        state: "listening",
+        transcript: "",
+        summary: "",
+        selected: false,
+        applicable: false,
+      };
+      updateReviewItems((items) => [...items, item]);
+      setPhase("idle");
+      reviewPendingRef.current.push(
+        captureReviewItem(item.id, started, reviewControllerRef.current.signal),
+      );
+      return;
+    }
     void handle(async (signal) => {
       const recording = await started;
       setPhase("transcribing");
@@ -184,7 +260,86 @@ export function Assistant({ doc, timeSec, disabled, onListen, onApply, onUndo }:
       }
       await run(transcript, startSec, signal);
     });
-  }, [handle, onApply, run]);
+  }, [captureReviewItem, handle, onApply, run, updateReviewItems]);
+
+  const beginReview = () => {
+    reviewControllerRef.current = new AbortController();
+    reviewPendingRef.current = [];
+    reviewCommandsRef.current = new Map();
+    updateReviewItems(() => []);
+    setReply(null);
+    setStage("listening");
+    onStartReview();
+  };
+
+  const closeReview = () => {
+    reviewControllerRef.current?.abort();
+    reviewControllerRef.current = null;
+    updateReviewItems(() => []);
+    setStage(null);
+  };
+
+  // 手順番号が変わらないよう、指示は確認を終えてからまとめて解釈し、適用まで編集には触れない。
+  const finishReview = async () => {
+    const signal = reviewControllerRef.current?.signal;
+    if (!signal) return;
+    onListen();
+    setStage("interpreting");
+    await Promise.all(reviewPendingRef.current);
+    const { doc: current } = latestRef.current;
+
+    for (const item of reviewItemsRef.current) {
+      if (signal.aborted) return;
+      if (item.state !== "instruction" && item.state !== "chatter") continue;
+      const patch = (values: Partial<ReviewItem>) =>
+        updateReviewItems((items) =>
+          items.map((other) => (other.id === item.id ? { ...other, ...values } : other)),
+        );
+      const itemSec = timelineAt(current, item.sourceSec) ?? 0;
+      try {
+        const commands = await interpret({
+          transcript: item.transcript,
+          doc: current,
+          timeSec: itemSec,
+          previousQuestion: null,
+          signal,
+        });
+        const result = applyCommands(current, commands, itemSec);
+        if (result.kind === "applied") {
+          reviewCommandsRef.current.set(item.id, commands);
+          patch({
+            summary: result.message,
+            applicable: true,
+            selected: item.state === "instruction",
+          });
+        } else if (result.kind === "undo") {
+          patch({ summary: "「元に戻す」は通しの確認では実行できません。" });
+        } else {
+          patch({ summary: result.kind === "question" ? result.question : result.message });
+        }
+      } catch (cause) {
+        if (signal.aborted) return;
+        patch({ summary: cause instanceof Error ? cause.message : "解釈できませんでした。" });
+      }
+    }
+    setStage("ready");
+  };
+
+  const applySelected = () => {
+    const plans = reviewItemsRef.current.flatMap((item) => {
+      const commands = reviewCommandsRef.current.get(item.id);
+      return item.selected && commands ? [{ commands, sourceSec: item.sourceSec }] : [];
+    });
+    const { doc: next, done, failed } = applyReview(latestRef.current.doc, plans);
+    onApply({ kind: "applied", doc: next, message: done.join(" ") });
+    setApplied(done.length > 0);
+    setReply({
+      heard: "",
+      tone: failed.length > 0 ? "failed" : "done",
+      message: [`${done.length} 件を適用しました。`, ...failed].join(" "),
+    });
+    closeReview();
+  };
 
   useEffect(() => {
     const isEditing = (target: EventTarget | null) =>
@@ -204,9 +359,17 @@ export function Assistant({ doc, timeSec, disabled, onListen, onApply, onUndo }:
     return () => {
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
-      controllerRef.current?.abort();
     };
   }, [startListening, stopListening]);
+
+  // 上の effect は再生中のコマごとに作り直されるので、中止は画面を閉じるときだけに分ける。
+  useEffect(
+    () => () => {
+      controllerRef.current?.abort();
+      reviewControllerRef.current?.abort();
+    },
+    [],
+  );
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -252,10 +415,37 @@ export function Assistant({ doc, timeSec, disabled, onListen, onApply, onUndo }:
           className="min-w-40 flex-1 rounded bg-paper-3 px-2 py-1.5 text-sm"
           placeholder="例: ここの説明を短くして"
           value={text}
-          disabled={disabled || busy}
+          disabled={disabled || busy || reviewStage !== null}
           onChange={(event) => setText(event.target.value)}
         />
+        {!reviewStage && (
+          <button
+            type="button"
+            disabled={disabled || busy}
+            className="rounded-md bg-paper-3 px-3 py-1.5 text-sm whitespace-nowrap hover:bg-rule disabled:cursor-not-allowed disabled:opacity-50"
+            onClick={beginReview}
+          >
+            通しで確認
+          </button>
+        )}
       </form>
+
+      {reviewStage && (
+        <ReviewPanel
+          stage={reviewStage}
+          items={reviewItems}
+          onToggle={(id) =>
+            updateReviewItems((items) =>
+              items.map((item) =>
+                item.id === id ? { ...item, selected: !item.selected } : item,
+              ),
+            )
+          }
+          onFinish={() => void finishReview()}
+          onApply={applySelected}
+          onCancel={closeReview}
+        />
+      )}
 
       {phase !== "idle" && (
         <p aria-live="polite" className="text-sm text-ink-2">
@@ -286,7 +476,7 @@ export function Assistant({ doc, timeSec, disabled, onListen, onApply, onUndo }:
               指示として実行
             </button>
           )}
-          {reply.tone === "done" && applied && (
+          {applied && reply.tone !== "ignored" && reply.tone !== "question" && (
             <button
               type="button"
               className="text-accent underline"

@@ -73,6 +73,7 @@ export function applyCommands(
   doc: DemoDocument,
   commands: Command[],
   timeSec: number,
+  clipIds: string[] = doc.clips.map((clip) => clip.id),
 ): CommandResult {
   const question = commands.find((command) => command.type === "clarify");
   if (question) return { kind: "question", question: question.question };
@@ -83,14 +84,16 @@ export function applyCommands(
       : { kind: "failed", message: "「元に戻す」は単独で指示してください。" };
   }
 
-  const clipIds = doc.clips.map((clip) => clip.id);
+  let next = doc;
   const clipOf = (stepNumber: number) => {
     const clipId = clipIds[stepNumber - 1];
     if (!clipId) throw new CommandError(`手順 ${stepNumber} はありません。`);
+    if (!next.clips.some((clip) => clip.id === clipId)) {
+      throw new CommandError(`手順 ${stepNumber} はすでにありません。`);
+    }
     return clipId;
   };
 
-  let next = doc;
   let seekClipId: string | null = null;
   const done: string[] = [];
 
