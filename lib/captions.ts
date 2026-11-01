@@ -137,17 +137,31 @@ function persistentRatio(
   return changed / current.length;
 }
 
+// 基準はコマの中央値で作る。1 コマだけで基準にすると、そこに写ったカーソルの跡が
+// 差として残り続け、大きいカーソルでは操作と誤認する。
+function settledFrame(frames: SignatureFrame[], index: number): SignatureFrame {
+  const [first, second, third] = frames.slice(index, index + 3);
+  if (!first || !second || !third) return first;
+  const signature = first.signature.map((value, cell) =>
+    Math.max(
+      Math.min(value, second.signature[cell]),
+      Math.min(Math.max(value, second.signature[cell]), third.signature[cell]),
+    ),
+  );
+  return { sec: first.sec, signature };
+}
+
 // 直前のコマとだけ比べると、1 文字ずつの入力は毎回の変化が小さくて見逃すので、
 // 操作を検出した時点の画面と比べ続けて変化を積み上げる。
 export function sampleChanges(frames: SignatureFrame[]) {
-  let baseline = frames[0];
+  let baseline = settledFrame(frames, 0);
   return frames.map(({ sec, signature }, index): Sample => {
     // 最後のコマは残るかどうかを確かめられないので、カーソルを誤検出しないよう数えない。
     const next = frames[index + 1]?.signature;
     if (index === 0 || !next) return { sec, ratio: 0 };
     const ratio = persistentRatio(baseline.signature, signature, next);
     const sample = { sec, ratio, baselineSec: baseline.sec };
-    if (ratio >= CHANGE_RATIO) baseline = frames[index];
+    if (ratio >= CHANGE_RATIO) baseline = settledFrame(frames, index);
     return sample;
   });
 }

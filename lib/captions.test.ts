@@ -62,8 +62,8 @@ describe("sampleChanges", () => {
     findOperations(sampleChanges(frames.map((signature, sec) => ({ sec, signature }))));
 
   it("adds up small changes such as slow typing", () => {
-    const typed = [0, 10, 20, 20, 20].map((length) => frame(cells(0, length)));
-    expect(run(typed)).toEqual([{ beforeSec: 1, afterSec: 2, referenceSec: 0 }]);
+    const typed = [0, 0, 0, 10, 20, 20, 20].map((length) => frame(cells(0, length)));
+    expect(run(typed)).toEqual([{ beforeSec: 3, afterSec: 4, referenceSec: 0 }]);
   });
 
   it("ignores a cursor that keeps moving", () => {
@@ -71,10 +71,15 @@ describe("sampleChanges", () => {
     expect(run(moving)).toEqual([]);
   });
 
+  it("ignores a large cursor that would leave a mark on the baseline", () => {
+    const moving = [0, 100, 200, 300, 400, 500].map((start) => frame(cells(start, 40)));
+    expect(run(moving)).toEqual([]);
+  });
+
   it("detects a change that stays on screen", () => {
     const after = frame(cells(0, 30));
-    expect(run([frame([]), after, after, after])).toEqual([
-      { beforeSec: 0, afterSec: 1, referenceSec: 0 },
+    expect(run([frame([]), frame([]), frame([]), after, after, after])).toEqual([
+      { beforeSec: 2, afterSec: 3, referenceSec: 0 },
     ]);
   });
 
