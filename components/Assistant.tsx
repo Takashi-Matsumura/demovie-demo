@@ -34,6 +34,7 @@ const KEY_MODES: Record<string, Mode> = { KeyV: "instruct", KeyC: "dictate" };
 type AssistantProps = {
   doc: DemoDocument;
   timeSec: number;
+  glossary: string;
   disabled: boolean;
   onListen: () => void;
   onApply: (result: Extract<CommandResult, { kind: "applied" }>) => void;
@@ -44,6 +45,7 @@ type AssistantProps = {
 export function Assistant({
   doc,
   timeSec,
+  glossary,
   disabled,
   onListen,
   onApply,
@@ -68,17 +70,18 @@ export function Assistant({
   const controllerRef = useRef<AbortController | null>(null);
   const questionRef = useRef<string | null>(null);
   // 非同期の処理が終わった時点の最新の状態で操作を適用する。
-  const latestRef = useRef({ doc, timeSec });
+  const latestRef = useRef({ doc, timeSec, glossary });
 
   useEffect(() => {
-    latestRef.current = { doc, timeSec };
-  }, [doc, timeSec]);
+    latestRef.current = { doc, timeSec, glossary };
+  }, [doc, timeSec, glossary]);
 
   const run = useCallback(
     async (transcript: string, startSec: number, signal: AbortSignal) => {
       setPhase("thinking");
       const commands = await interpret({
         transcript,
+        glossary: latestRef.current.glossary,
         doc: latestRef.current.doc,
         timeSec: startSec,
         previousQuestion: questionRef.current,
@@ -224,7 +227,7 @@ export function Assistant({
       if (!transcript) throw new Error("音声を聞き取れませんでした。もう一度話してください。");
       if (dictating) {
         setPhase("tidying");
-        const narration = await tidyNarration(transcript, signal);
+        const narration = await tidyNarration(transcript, latestRef.current.glossary, signal);
         const { doc: current } = latestRef.current;
         const step = locate(current, startSec).index + 1;
         const result = applyCommands(
@@ -299,6 +302,7 @@ export function Assistant({
       try {
         const commands = await interpret({
           transcript: item.transcript,
+          glossary: latestRef.current.glossary,
           doc: current,
           timeSec: itemSec,
           previousQuestion: null,

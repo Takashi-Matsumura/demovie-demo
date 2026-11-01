@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { BACKGROUND_IDS, type Caption, type DemoDocument, type Look, type Zoom } from "@/lib/document";
+import { parseGlossary } from "@/lib/glossary";
 import { BACKGROUNDS } from "@/lib/render";
 
 type CaptionPanel = {
@@ -16,6 +17,8 @@ type InspectorProps = {
   doc: DemoDocument;
   zoom: Zoom | null;
   caption: CaptionPanel | null;
+  glossary: string;
+  onGlossary: (text: string) => void;
   onLook: (patch: Partial<Look>) => void;
   onZoom: (patch: Partial<Pick<Zoom, "depth" | "focusX" | "focusY">>) => void;
   onZoomLength: (lengthSec: number) => void;
@@ -61,6 +64,8 @@ export function Inspector({
   doc,
   zoom,
   caption,
+  glossary,
+  onGlossary,
   onLook,
   onZoom,
   onZoomLength,
@@ -71,6 +76,7 @@ export function Inspector({
 }: InspectorProps) {
   const { look } = doc;
   const [lookOpen, setLookOpen] = useState(true);
+  const [glossaryOpen, setGlossaryOpen] = useState(false);
 
   return (
     <aside className="flex flex-col gap-6 rounded-lg bg-paper-2 p-4">
@@ -140,6 +146,40 @@ export function Inspector({
                 onChange={(event) => onLook({ shadow: event.target.checked })}
               />
             </label>
+          </>
+        )}
+      </section>
+
+      <section className="flex flex-col gap-3">
+        <h2 className="text-sm font-semibold">
+          <button
+            type="button"
+            aria-expanded={glossaryOpen}
+            className="flex w-full items-center justify-between"
+            onClick={() => setGlossaryOpen((open) => !open)}
+          >
+            用語（{parseGlossary(glossary).length}）
+            <span
+              aria-hidden
+              className={`text-ink-2 transition-transform duration-(--dur-fast) ${glossaryOpen ? "rotate-180" : ""}`}
+            >
+              ▾
+            </span>
+          </button>
+        </h2>
+        {glossaryOpen && (
+          <>
+            <textarea
+              aria-label="用語の一覧"
+              rows={5}
+              className="w-full resize-y rounded bg-paper-3 p-2 text-sm"
+              placeholder={"楽楽精算\nDemovie = デモービー"}
+              value={glossary}
+              onChange={(event) => onGlossary(event.target.value)}
+            />
+            <p className="text-xs text-ink-2">
+              1 行に 1 語。読みが表記と離れている語は「表記 = 読み」と書きます。AI が聞き間違いを直すときと、手順の説明文を作るときに使います。
+            </p>
           </>
         )}
       </section>
