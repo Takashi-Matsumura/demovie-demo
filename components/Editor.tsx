@@ -230,6 +230,8 @@ function StartScreen({ error, onError, onOpen, onResume }: StartScreenProps) {
           </p>
         )}
 
+        <ServiceStatusBar />
+
         <RecentProjects onError={onError} onResume={onResume} />
       </div>
     </main>
