@@ -1,5 +1,5 @@
 // 手元の whisper-server を直接呼ぶ。音声はこの PC の外へは出ない。
-const WHISPER_URL = process.env.NEXT_PUBLIC_WHISPER_URL ?? "http://127.0.0.1:8090";
+export const WHISPER_URL = process.env.NEXT_PUBLIC_WHISPER_URL ?? "http://127.0.0.1:8090";
 
 const SAMPLE_RATE = 16_000;
 

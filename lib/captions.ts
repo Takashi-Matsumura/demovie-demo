@@ -3,7 +3,7 @@ import { formatGlossary } from "./glossary";
 import { seekTo, waitForEvent } from "./media";
 
 // 手元の llama-server を直接呼ぶ。動画のフレームはこの PC の外へは出ない。
-const VISION_URL = process.env.NEXT_PUBLIC_VISION_URL ?? "http://127.0.0.1:8084";
+export const VISION_URL = process.env.NEXT_PUBLIC_VISION_URL ?? "http://127.0.0.1:8084";
 
 const SAMPLE_SEC = 1;
 const SIGNATURE_WIDTH = 64;

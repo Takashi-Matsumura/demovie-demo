@@ -4,7 +4,7 @@ import type { DemoDocument } from "./document";
 import { formatGlossary } from "./glossary";
 
 // 手元の llama-server を直接呼ぶ。指示の内容はこの PC の外へは出ない。
-const LLM_URL = process.env.NEXT_PUBLIC_LLM_URL ?? "http://127.0.0.1:8080";
+export const LLM_URL = process.env.NEXT_PUBLIC_LLM_URL ?? "http://127.0.0.1:8080";
 
 const SYSTEM_PROMPT = `あなたは説明動画エディタの操作担当です。ユーザーの指示を commands の JSON に変換します。
 ・「ここ」「今の」「これ」は playheadStep の手順を指す

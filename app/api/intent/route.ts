@@ -17,13 +17,32 @@ const LOCAL_HOSTNAMES = ["localhost", "127.0.0.1", "[::1]"];
 
 // API キーを持つのはサーバ側だけ。Origin と Host の一致で別のポートのサイトを、
 // 許可先との照合で DNS リバインディングを防ぐ。両方そろわないと通さない。
+function isTrustedHost(url: URL) {
+  const appOrigin = process.env.APP_ORIGIN;
+  return appOrigin ? url.origin === appOrigin : LOCAL_HOSTNAMES.includes(url.hostname);
+}
+
 function isTrusted(request: Request) {
   const origin = request.headers.get("origin");
   if (!origin || !URL.canParse(origin)) return false;
   const url = new URL(origin);
-  if (url.host !== request.headers.get("host")) return false;
-  const appOrigin = process.env.APP_ORIGIN;
-  return appOrigin ? url.origin === appOrigin : LOCAL_HOSTNAMES.includes(url.hostname);
+  return url.host === request.headers.get("host") && isTrustedHost(url);
+}
+
+// 同一オリジンの GET には Origin が付かないので、Host だけで確かめる。
+function isTrustedRead(request: Request) {
+  const host = request.headers.get("host");
+  if (!host || !URL.canParse(`http://${host}`)) return false;
+  const url = new URL(`http://${host}`);
+  return process.env.APP_ORIGIN
+    ? url.host === new URL(process.env.APP_ORIGIN).host
+    : isTrustedHost(url);
+}
+
+// キーの値は返さず、設定の有無だけを返す。
+export function GET(request: Request) {
+  if (!isTrustedRead(request)) return Response.json({ error: "forbidden" }, { status: 403 });
+  return Response.json({ configured: Boolean(process.env.TYPESAFE_API_KEY) });
 }
 
 export async function POST(request: Request) {

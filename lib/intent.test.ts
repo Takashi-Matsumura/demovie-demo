@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { POST } from "../app/api/intent/route";
+import { GET, POST } from "../app/api/intent/route";
 import { classifyIntent, isChatter } from "./intent";
 
 function request(
@@ -121,6 +121,23 @@ describe("POST /api/intent", () => {
     expect((await POST(request({ text: "a" }))).status).toBe(502);
     vi.stubGlobal("fetch", async () => Response.json({ answers: {} }));
     expect((await POST(request({ text: "a" }))).status).toBe(502);
+  });
+});
+
+describe("GET /api/intent", () => {
+  const read = (host: string) => new Request("http://localhost/api/intent", { headers: { host } });
+
+  it("tells whether a key is set without revealing it", async () => {
+    vi.stubEnv("TYPESAFE_API_KEY", "secret");
+    const body = await GET(read("localhost:3001")).text();
+    expect(JSON.parse(body)).toEqual({ configured: true });
+    expect(body).not.toContain("secret");
+    vi.stubEnv("TYPESAFE_API_KEY", "");
+    expect(await GET(read("localhost:3001")).json()).toEqual({ configured: false });
+  });
+
+  it("does not answer other hosts", () => {
+    expect(GET(read("evil.example")).status).toBe(403);
   });
 });
 
