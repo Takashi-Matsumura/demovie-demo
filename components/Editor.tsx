@@ -626,6 +626,7 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
 
           <Assistant
             doc={doc}
+            src={source.url}
             timeSec={timeSec}
             glossary={glossary}
             disabled={exporting || generating}

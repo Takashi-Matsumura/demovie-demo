@@ -135,7 +135,7 @@ function signatureOf(ctx: CanvasRenderingContext2D, video: HTMLVideoElement) {
   return data.filter((_, index) => index % 4 === 0);
 }
 
-function frameUrl(video: HTMLVideoElement) {
+export function frameUrl(video: HTMLVideoElement) {
   const canvas = document.createElement("canvas");
   canvas.width = FRAME_WIDTH;
   canvas.height = Math.round((FRAME_WIDTH * video.videoHeight) / video.videoWidth);

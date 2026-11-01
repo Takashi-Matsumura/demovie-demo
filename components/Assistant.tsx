@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { interpret, tidyNarration } from "@/lib/assistant";
-import { applyCommands, type Command, type CommandResult } from "@/lib/commands";
+import { applyCommands, type CommandResult, type ResolvedCommand } from "@/lib/commands";
 import { newId, type DemoDocument } from "@/lib/document";
 import { classifyIntent } from "@/lib/intent";
+import { resolveTargets } from "@/lib/locate";
 import { applyReview, timelineAt } from "@/lib/review";
 import { startRecording, toWav, transcribe, type VoiceRecording } from "@/lib/speech";
 import { locate } from "@/lib/timeline";
@@ -33,6 +34,7 @@ const KEY_MODES: Record<string, Mode> = { KeyV: "instruct", KeyC: "dictate" };
 
 type AssistantProps = {
   doc: DemoDocument;
+  src: string;
   timeSec: number;
   glossary: string;
   disabled: boolean;
@@ -44,6 +46,7 @@ type AssistantProps = {
 
 export function Assistant({
   doc,
+  src,
   timeSec,
   glossary,
   disabled,
@@ -61,7 +64,7 @@ export function Assistant({
   const [reviewItems, setReviewItems] = useState<ReviewItem[]>([]);
   const reviewStageRef = useRef<ReviewStage | null>(null);
   const reviewItemsRef = useRef<ReviewItem[]>([]);
-  const reviewCommandsRef = useRef(new Map<string, Command[]>());
+  const reviewCommandsRef = useRef(new Map<string, ResolvedCommand[]>());
   const reviewPendingRef = useRef<Promise<void>[]>([]);
   const reviewControllerRef = useRef<AbortController | null>(null);
   const recordingRef = useRef<Promise<VoiceRecording> | null>(null);
@@ -87,7 +90,10 @@ export function Assistant({
         previousQuestion: questionRef.current,
         signal,
       });
-      const result = applyCommands(latestRef.current.doc, commands, startSec);
+      const { doc: current } = latestRef.current;
+      const { sourceSec } = locate(current, startSec);
+      const resolved = await resolveTargets(commands, src, sourceSec, signal);
+      const result = applyCommands(current, resolved, startSec);
       questionRef.current = result.kind === "question" ? result.question : null;
       setApplied(result.kind === "applied");
 
@@ -103,7 +109,7 @@ export function Assistant({
         setReply({ heard: transcript, tone: "failed", message: result.message });
       }
     },
-    [onApply, onUndo],
+    [onApply, onUndo, src],
   );
 
   const handle = useCallback(async (work: (signal: AbortSignal) => Promise<void>) => {
@@ -308,9 +314,10 @@ export function Assistant({
           previousQuestion: null,
           signal,
         });
-        const result = applyCommands(current, commands, itemSec);
+        const resolved = await resolveTargets(commands, src, item.sourceSec, signal);
+        const result = applyCommands(current, resolved, itemSec);
         if (result.kind === "applied") {
-          reviewCommandsRef.current.set(item.id, commands);
+          reviewCommandsRef.current.set(item.id, resolved);
           patch({
             summary: result.message,
             applicable: true,

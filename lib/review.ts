@@ -1,12 +1,12 @@
-import { applyCommands, type Command } from "./commands";
+import { applyCommands, type ResolvedCommand } from "./commands";
 import type { DemoDocument } from "./document";
 import { clipSpans } from "./timeline";
 
-export type ReviewPlan = { commands: Command[]; sourceSec: number };
+export type ReviewPlan = { commands: ResolvedCommand[]; sourceSec: number };
 
 export type ReviewOutcome = { doc: DemoDocument; done: string[]; failed: string[] };
 
-const NEEDS_PLAYHEAD = new Set<Command["type"]>(["split_here", "add_zoom"]);
+const NEEDS_PLAYHEAD = new Set<ResolvedCommand["type"]>(["split_here", "add_zoom", "zoom_focus"]);
 
 // 話した位置は素材の時刻で覚える。前の指示で手順が消えても、タイムライン時刻と違ってズレない。
 export function timelineAt(doc: DemoDocument, sourceSec: number) {
