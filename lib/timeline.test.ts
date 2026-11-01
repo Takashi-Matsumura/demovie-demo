@@ -17,6 +17,7 @@ import {
   moveClip,
   removeBlur,
   setBlurRange,
+  setBlurStyle,
   setCaptionRange,
   setStepText,
   setZoomLength,
@@ -325,6 +326,21 @@ describe("blurs", () => {
     const portrait = mosaicGrid(1080, 400, 1080, 1920);
     expect(1080 / portrait.columns).toBeGreaterThanOrEqual(1920 * (16 / 9) * 0.02);
     expect(mosaicGrid(320, 160, 320, 180)).toEqual({ columns: 20, rows: 10 });
+  });
+
+  it("switches to a solid box and back", () => {
+    const doc = addBlur(makeDoc(), rect);
+    expect(doc.blurs[0].style).toBe("mosaic");
+    const solid = setBlurStyle(doc, doc.blurs[0].id, "solid");
+    expect(solid.blurs[0].style).toBe("solid");
+    expect(documentSchema.safeParse(solid).success).toBe(true);
+  });
+
+  it("opens blurs saved before styles existed as mosaics", () => {
+    const doc = addBlur(makeDoc(), rect);
+    const { style: _style, ...saved } = doc.blurs[0];
+    expect(_style).toBe("mosaic");
+    expect(documentSchema.parse({ ...doc, blurs: [saved] }).blurs[0].style).toBe("mosaic");
   });
 
   it("opens work saved before blurs existed", () => {

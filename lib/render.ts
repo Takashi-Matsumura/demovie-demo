@@ -131,6 +131,18 @@ function drawBlurs(
     const bottom = Math.min(blurY + blurHeight, crop.y + crop.height);
     if (right <= left || bottom <= top) continue;
 
+    if (blur.style === "solid") {
+      // 元の画素を読まないので、映像の情報は一切残らない。
+      ctx.fillStyle = "#000";
+      ctx.fillRect(
+        frame.x + (left - crop.x) * scale,
+        frame.y + (top - crop.y) * scale,
+        (right - left) * scale,
+        (bottom - top) * scale,
+      );
+      continue;
+    }
+
     const { columns, rows } = mosaicGrid(blurWidth, blurHeight, vw, vh);
     mosaicCanvas.width = columns;
     mosaicCanvas.height = rows;

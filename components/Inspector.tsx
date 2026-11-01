@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import {
   BACKGROUND_IDS,
+  type Blur,
   type Caption,
   type DemoDocument,
   type Look,
@@ -29,6 +30,7 @@ type InspectorProps = {
   onGlossary: (text: string) => void;
   onNarration: (patch: Partial<Narration>) => void;
   onBlurScope: (blurId: string, scope: "all" | "step") => void;
+  onBlurStyle: (blurId: string, style: Blur["style"]) => void;
   onBlurRemove: (blurId: string) => void;
   onLook: (patch: Partial<Look>) => void;
   onZoom: (patch: Partial<Pick<Zoom, "depth" | "focusX" | "focusY">>) => void;
@@ -79,6 +81,7 @@ export function Inspector({
   onGlossary,
   onNarration,
   onBlurScope,
+  onBlurStyle,
   onBlurRemove,
   onLook,
   onZoom,
@@ -282,10 +285,21 @@ export function Inspector({
           <h2 className="text-sm font-semibold">ぼかし（{doc.blurs.length}）</h2>
           <ul className="flex flex-col gap-1">
             {doc.blurs.map((blur, index) => (
-              <li key={blur.id} className="flex items-center gap-2 text-sm">
+              <li key={blur.id} className="flex flex-wrap items-center gap-2 text-sm">
+                <select
+                  aria-label={`ぼかし ${index + 1} の種類`}
+                  className="min-w-0 flex-1 rounded bg-paper-3 p-1 text-sm"
+                  value={blur.style}
+                  onChange={(event) =>
+                    onBlurStyle(blur.id, event.target.value === "solid" ? "solid" : "mosaic")
+                  }
+                >
+                  <option value="mosaic">モザイク</option>
+                  <option value="solid">黒塗り</option>
+                </select>
                 <select
                   aria-label={`ぼかし ${index + 1} の範囲`}
-                  className="min-w-0 flex-1 rounded bg-paper-3 p-1 text-sm"
+                  className="order-last w-full rounded bg-paper-3 p-1 text-sm"
                   value={
                     blur.sourceEndSec - blur.sourceStartSec >= doc.asset.durationSec
                       ? "all"
@@ -309,6 +323,9 @@ export function Inspector({
               </li>
             ))}
           </ul>
+          <p className="text-xs text-ink-2">
+            パスワードや個人情報には黒塗りをおすすめします。モザイクは元の色の平均が残ります。
+          </p>
         </section>
       )}
 

@@ -3,6 +3,7 @@ import { z } from "zod";
 export const SCHEMA_VERSION = 1;
 
 export const BACKGROUND_IDS = ["dusk", "ember", "slate", "paper"] as const;
+export const BLUR_STYLES = ["mosaic", "solid"] as const;
 
 const clipSchema = z
   .object({
@@ -46,6 +47,7 @@ const blurSchema = z
     y: z.number().min(0).max(1),
     width: z.number().positive().max(1),
     height: z.number().positive().max(1),
+    style: z.enum(BLUR_STYLES).default("mosaic"),
   })
   .refine((blur) => blur.sourceEndSec > blur.sourceStartSec);
 
