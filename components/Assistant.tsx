@@ -1,13 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
-import { interpret } from "@/lib/assistant";
+import { interpret, tidyNarration } from "@/lib/assistant";
 import { applyCommands, type CommandResult } from "@/lib/commands";
 import type { DemoDocument } from "@/lib/document";
 import { classifyIntent } from "@/lib/intent";
 import { startRecording, toWav, transcribe, type VoiceRecording } from "@/lib/speech";
+import { locate } from "@/lib/timeline";
 
-type Phase = "idle" | "recording" | "transcribing" | "classifying" | "thinking";
+type Phase = "idle" | "recording" | "transcribing" | "classifying" | "thinking" | "tidying";
+
+type Mode = "instruct" | "dictate";
 
 type Reply = {
   heard: string;
@@ -21,7 +24,10 @@ const PHASE_LABEL: Record<Exclude<Phase, "idle">, string> = {
   transcribing: "文字にしています…",
   classifying: "指示かどうかを確認しています…",
   thinking: "AI が操作を考えています…",
+  tidying: "説明文に整えています…",
 };
+
+const KEY_MODES: Record<string, Mode> = { KeyV: "instruct", KeyC: "dictate" };
 
 type AssistantProps = {
   doc: DemoDocument;
@@ -37,7 +43,10 @@ export function Assistant({ doc, timeSec, disabled, onListen, onApply, onUndo }:
   const [reply, setReply] = useState<Reply | null>(null);
   const [text, setText] = useState("");
   const [applied, setApplied] = useState(false);
+  const [mode, setMode] = useState<Mode>("instruct");
   const recordingRef = useRef<Promise<VoiceRecording> | null>(null);
+  const modeRef = useRef<Mode>("instruct");
+  const startSecRef = useRef(0);
   const controllerRef = useRef<AbortController | null>(null);
   const questionRef = useRef<string | null>(null);
   // 非同期の処理が終わった時点の最新の状態で操作を適用する。
@@ -92,9 +101,14 @@ export function Assistant({ doc, timeSec, disabled, onListen, onApply, onUndo }:
     }
   }, []);
 
-  const startListening = useCallback(() => {
+  // 説明文は見ながら話せるよう再生を止めず、話し始めた時点の手順に入れる。
+  const startListening = useCallback(
+    (nextMode: Mode) => {
     if (recordingRef.current || disabled) return;
-    onListen();
+    if (nextMode === "instruct") onListen();
+    modeRef.current = nextMode;
+    setMode(nextMode);
+    startSecRef.current = latestRef.current.timeSec;
     setPhase("recording");
     setReply(null);
     const started = startRecording();
@@ -111,13 +125,16 @@ export function Assistant({ doc, timeSec, disabled, onListen, onApply, onUndo }:
           : "マイクを開始できませんでした。",
       });
     });
-  }, [disabled, onListen]);
+    },
+    [disabled, onListen],
+  );
 
   const stopListening = useCallback(() => {
     const started = recordingRef.current;
     if (!started) return;
     recordingRef.current = null;
-    const startSec = latestRef.current.timeSec;
+    const startSec = startSecRef.current;
+    const dictating = modeRef.current === "dictate";
     void handle(async (signal) => {
       const recording = await started;
       setPhase("transcribing");
@@ -129,6 +146,28 @@ export function Assistant({ doc, timeSec, disabled, onListen, onApply, onUndo }:
           : new Error("音声を聞き取れませんでした。もう少し長く話してください。");
       });
       if (!transcript) throw new Error("音声を聞き取れませんでした。もう一度話してください。");
+      if (dictating) {
+        setPhase("tidying");
+        const narration = await tidyNarration(transcript, signal);
+        const { doc: current } = latestRef.current;
+        const step = locate(current, startSec).index + 1;
+        const result = applyCommands(
+          current,
+          [{ type: "set_step_text", step, text: narration }],
+          startSec,
+        );
+        if (result.kind === "applied") onApply(result);
+        setApplied(result.kind === "applied");
+        setReply({
+          heard: transcript,
+          tone: result.kind === "applied" ? "done" : "failed",
+          message:
+            result.kind === "applied"
+              ? `手順 ${step} の説明文を入れました。`
+              : "説明文を入れられませんでした。",
+        });
+        return;
+      }
       // 聞き返しへの返事は「はい」のように短く、単独では指示に見えないので判定しない。
       if (!questionRef.current) {
         setPhase("classifying");
@@ -145,19 +184,20 @@ export function Assistant({ doc, timeSec, disabled, onListen, onApply, onUndo }:
       }
       await run(transcript, startSec, signal);
     });
-  }, [handle, run]);
+  }, [handle, onApply, run]);
 
   useEffect(() => {
     const isEditing = (target: EventTarget | null) =>
       target instanceof HTMLElement && target.closest("input, textarea") !== null;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.code !== "KeyV" || event.repeat || event.metaKey || event.ctrlKey) return;
+      const nextMode = KEY_MODES[event.code];
+      if (!nextMode || event.repeat || event.metaKey || event.ctrlKey) return;
       if (isEditing(event.target)) return;
       event.preventDefault();
-      startListening();
+      startListening(nextMode);
     };
     const onKeyUp = (event: KeyboardEvent) => {
-      if (event.code === "KeyV") stopListening();
+      if (KEY_MODES[event.code]) stopListening();
     };
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
@@ -183,20 +223,30 @@ export function Assistant({ doc, timeSec, disabled, onListen, onApply, onUndo }:
   return (
     <section aria-label="AI への指示" className="flex flex-col gap-2 rounded-lg bg-paper-2 p-3">
       <form onSubmit={submit} className="flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          aria-pressed={phase === "recording"}
-          disabled={disabled || (busy && phase !== "recording")}
-          className={`touch-none rounded-md px-3 py-1.5 text-sm font-medium whitespace-nowrap select-none disabled:cursor-not-allowed disabled:opacity-50 ${
-            phase === "recording" ? "bg-danger text-paper" : "bg-accent text-accent-ink"
-          }`}
-          onPointerDown={startListening}
-          onPointerUp={stopListening}
-          onPointerCancel={stopListening}
-          onPointerLeave={stopListening}
-        >
-          押して話す（V）
-        </button>
+        {(["instruct", "dictate"] as const).map((item) => {
+          const active = phase === "recording" && mode === item;
+          return (
+            <button
+              key={item}
+              type="button"
+              aria-pressed={active}
+              disabled={disabled || (busy && !active)}
+              className={`touch-none rounded-md px-3 py-1.5 text-sm font-medium whitespace-nowrap select-none disabled:cursor-not-allowed disabled:opacity-50 ${
+                active
+                  ? "bg-danger text-paper"
+                  : item === "instruct"
+                    ? "bg-accent text-accent-ink"
+                    : "bg-paper-3 text-ink"
+              }`}
+              onPointerDown={() => startListening(item)}
+              onPointerUp={stopListening}
+              onPointerCancel={stopListening}
+              onPointerLeave={stopListening}
+            >
+              {item === "instruct" ? "押して指示（V）" : "説明文を話す（C）"}
+            </button>
+          );
+        })}
         <input
           aria-label="AI への指示を入力"
           className="min-w-40 flex-1 rounded bg-paper-3 px-2 py-1.5 text-sm"
@@ -209,7 +259,9 @@ export function Assistant({ doc, timeSec, disabled, onListen, onApply, onUndo }:
 
       {phase !== "idle" && (
         <p aria-live="polite" className="text-sm text-ink-2">
-          {PHASE_LABEL[phase]}
+          {phase === "recording" && mode === "dictate"
+            ? "説明を聞いています。再生はそのまま続きます…"
+            : PHASE_LABEL[phase]}
         </p>
       )}
       {phase === "idle" && reply && (

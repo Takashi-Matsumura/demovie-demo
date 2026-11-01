@@ -81,3 +81,44 @@ export async function interpret({
     throw new Error("AI の返答を理解できませんでした。言い方を変えてお試しください。");
   }
 }
+
+const TIDY_PROMPT = `動画の説明文を担当します。話し言葉を、画面に表示する説明文に整えてください。
+・「えーと」「あの」などのつなぎ言葉と、言い直しの前半を取り除く
+・「ですます」の丁寧語にする
+・話した内容だけを使い、情報を足さない。固有名詞、数字、ボタン名は変えない
+・整えた説明文だけを出力する`;
+
+const MAX_TIDY_GROWTH = 1.5;
+
+// 話した内容より大幅に長い返答は、情報が足されている恐れがあるので使わない。
+export function acceptTidied(spoken: string, tidied: string) {
+  const text = tidied.trim();
+  const limit = spoken.length * MAX_TIDY_GROWTH + 10;
+  return text && text.length <= limit ? text : spoken;
+}
+
+// 整えられないときは話した言葉のまま使う。言葉そのものは聞き取れているので失わない。
+export async function tidyNarration(spoken: string, signal: AbortSignal) {
+  try {
+    const response = await fetch(`${LLM_URL}/v1/chat/completions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal,
+      body: JSON.stringify({
+        messages: [
+          { role: "system", content: TIDY_PROMPT },
+          { role: "user", content: spoken },
+        ],
+        temperature: 0.1,
+        max_tokens: 300,
+        chat_template_kwargs: { enable_thinking: false },
+      }),
+    });
+    if (!response.ok) return spoken;
+    const data: { choices?: { message?: { content?: string } }[] } = await response.json();
+    return acceptTidied(spoken, data.choices?.[0]?.message?.content ?? "");
+  } catch (cause) {
+    if (signal.aborted) throw cause;
+    return spoken;
+  }
+}
