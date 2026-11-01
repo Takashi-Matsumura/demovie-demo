@@ -6,11 +6,12 @@ import { seekTo, waitForEvent } from "./media";
 export const VISION_URL = process.env.NEXT_PUBLIC_VISION_URL ?? "http://127.0.0.1:8084";
 
 const SAMPLE_SEC = 1;
-const SIGNATURE_WIDTH = 64;
-const SIGNATURE_HEIGHT = 36;
+// 64×36 だと文字入力がカーソルの移動と同じ大きさに潰れて、入力を検出できない。
+const SIGNATURE_WIDTH = 160;
+const SIGNATURE_HEIGHT = 90;
 const PIXEL_THRESHOLD = 12;
-// 2304 マス中の約 12 マス。カーソル移動の 2〜3 マスは操作として拾わない。
-const CHANGE_RATIO = 0.005;
+// 実画面の測定で、カーソルの移動は約 0.07%、12 文字の入力は約 0.13% だった。
+const CHANGE_RATIO = 0.001;
 const MERGE_GAP_SEC = 2;
 const MAX_OPERATION_SEC = 10;
 const SETTLE_SEC = 0.5;
@@ -114,9 +115,15 @@ export function findOperations(samples: Sample[]) {
   return operations;
 }
 
+const QUOTE_PAIRS: Record<string, string> = { "「": "」", "『": "』", '"': '"' };
+
+// 文全体を囲む引用符だけを外す。「保存」ボタンを押します、のような部分の引用符は残す。
 export function cleanCaption(reply: string) {
   const [line = ""] = reply.trim().split("\n");
-  return line.replace(/^(?:キャプション[:：]\s*)?[「『"]?|[」』"]$/g, "").trim();
+  const text = line.replace(/^キャプション[:：]\s*/, "").trim();
+  const closing = QUOTE_PAIRS[text[0]];
+  const wrapped = closing && text.endsWith(closing) && !text.slice(1, -1).includes(closing);
+  return wrapped ? text.slice(1, -1).trim() : text;
 }
 
 // 分割済みのクリップでは境界そのものが操作なので、1 サンプル手前から比べる。

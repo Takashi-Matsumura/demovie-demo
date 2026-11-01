@@ -15,7 +15,7 @@ function samples(ratios: number[]): Sample[] {
 
 describe("findOperations", () => {
   it("ignores a still screen", () => {
-    expect(findOperations(samples([0, 0, 0.001, 0]))).toEqual([]);
+    expect(findOperations(samples([0, 0, 0.0005, 0]))).toEqual([]);
   });
 
   it("merges a burst of changes and starts before it", () => {
@@ -57,6 +57,11 @@ describe("cleanCaption", () => {
     expect(cleanCaption("  「ズームを設定」\n補足です")).toBe("ズームを設定");
     expect(cleanCaption("キャプション：設定を開く")).toBe("設定を開く");
     expect(cleanCaption("")).toBe("");
+  });
+
+  it("keeps quotes that belong to the sentence", () => {
+    expect(cleanCaption("「保存」ボタンを押します。")).toBe("「保存」ボタンを押します。");
+    expect(cleanCaption("「A」と「B」")).toBe("「A」と「B」");
   });
 });
 
