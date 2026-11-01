@@ -317,6 +317,7 @@ type DragBox = {
 };
 
 const MIN_BLUR_SIZE = 0.01;
+const END_MARGIN_SEC = 0.05;
 
 type CaptionState =
   | { status: "idle" }
@@ -629,6 +630,7 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
             src={source.url}
             timeSec={timeSec}
             glossary={glossary}
+            ended={!playing && timeSec >= totalDuration(doc) - END_MARGIN_SEC}
             disabled={exporting || generating}
             onListen={() => {
               if (playing) void toggle();
