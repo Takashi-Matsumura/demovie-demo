@@ -49,6 +49,22 @@ const blurSchema = z
   })
   .refine((blur) => blur.sourceEndSec > blur.sourceStartSec);
 
+const narrationSchema = z.object({
+  enabled: z.boolean(),
+  voiceId: z.number().int(),
+  voiceName: z.string(),
+  speed: z.number().min(0.5).max(2),
+  keepOriginalAudio: z.boolean(),
+});
+
+const DEFAULT_NARRATION = {
+  enabled: false,
+  voiceId: 13,
+  voiceName: "青山龍星",
+  speed: 1,
+  keepOriginalAudio: false,
+};
+
 const lookSchema = z.object({
   background: z.enum(BACKGROUND_IDS),
   paddingPct: z.number().min(0).max(20),
@@ -72,6 +88,7 @@ export const documentSchema = z.object({
   captions: z.array(captionSchema),
   // この項目より前に保存した作業を読み込めるよう、既定値を持たせる。
   blurs: z.array(blurSchema).default([]),
+  narration: narrationSchema.default(DEFAULT_NARRATION),
   look: lookSchema,
 });
 
@@ -80,6 +97,7 @@ export type Clip = z.infer<typeof clipSchema>;
 export type Zoom = z.infer<typeof zoomSchema>;
 export type Caption = z.infer<typeof captionSchema>;
 export type Blur = z.infer<typeof blurSchema>;
+export type Narration = z.infer<typeof narrationSchema>;
 export type Look = z.infer<typeof lookSchema>;
 export type Asset = z.infer<typeof assetSchema>;
 
@@ -98,6 +116,7 @@ export function createDocument(asset: Asset): DemoDocument {
     zooms: [],
     captions: [],
     blurs: [],
+    narration: DEFAULT_NARRATION,
     look: { background: "dusk", paddingPct: 6, radiusPct: 2, shadow: true },
   };
 }

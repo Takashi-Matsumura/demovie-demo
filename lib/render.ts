@@ -1,4 +1,5 @@
 import type { DemoDocument } from "./document";
+import { narrationCredit } from "./narration";
 import { blursAt, cameraAt, captionTextAt } from "./timeline";
 
 export const OUTPUT_WIDTH = 1920;
@@ -95,7 +96,11 @@ export function thumbnailSec(clip: { sourceStartSec: number; sourceEndSec: numbe
 
 // 画面を大きく見せるため、背景の余白をなくす。モザイクはそのまま残す。
 export function thumbnailDoc(doc: DemoDocument): DemoDocument {
-  return { ...doc, look: { ...doc.look, paddingPct: 0, radiusPct: 0, shadow: false } };
+  return {
+    ...doc,
+    narration: { ...doc.narration, enabled: false },
+    look: { ...doc.look, paddingPct: 0, radiusPct: 0, shadow: false },
+  };
 }
 
 let mosaicCanvas: HTMLCanvasElement | null = null;
@@ -210,6 +215,24 @@ export function drawFrame(
 
   const caption = captionTextAt(doc, clipId, sourceSec)?.trim();
   if (caption) drawCaption(ctx, caption, frameY + frameHeight);
+
+  // 音声の利用条件でクレジットが必須なので、書き忘れないよう動画に入れる。
+  const credit = narrationCredit(doc);
+  if (credit) drawCredit(ctx, credit);
+}
+
+function drawCredit(ctx: CanvasRenderingContext2D, credit: string) {
+  const { width, height } = ctx.canvas;
+  const fontSize = width * 0.012;
+  ctx.save();
+  ctx.font = `500 ${fontSize}px system-ui, "Hiragino Sans", sans-serif`;
+  ctx.textAlign = "right";
+  ctx.textBaseline = "bottom";
+  ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
+  ctx.fillText(credit, width - fontSize * 0.9, height - fontSize * 0.45);
+  ctx.fillStyle = "#fff";
+  ctx.fillText(credit, width - fontSize, height - fontSize * 0.55);
+  ctx.restore();
 }
 
 function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number) {

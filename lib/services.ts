@@ -1,8 +1,9 @@
 import { LLM_URL } from "./assistant";
 import { VISION_URL } from "./captions";
+import { VOICEVOX_URL } from "./narration";
 import { WHISPER_URL } from "./speech";
 
-export type ServiceId = "vision" | "llm" | "whisper" | "intent";
+export type ServiceId = "vision" | "llm" | "whisper" | "intent" | "voice";
 
 export type ServiceState = "ok" | "down" | "off";
 
@@ -13,6 +14,7 @@ export const SERVICES: Omit<ServiceStatus, "state">[] = [
   { id: "llm", label: "指示の解釈", impact: "AI への指示と、説明文を整える処理が使えません。" },
   { id: "whisper", label: "音声認識", impact: "音声の指示と「説明文を話す」が使えません。" },
   { id: "intent", label: "独り言の判定", impact: "判定を省いて、発話を指示として扱います。" },
+  { id: "voice", label: "読み上げ", impact: "ナレーションが使えません。" },
 ];
 
 const TIMEOUT_MS = 2000;
@@ -44,13 +46,22 @@ const checks: Record<ServiceId, () => Promise<ServiceState>> = {
     const { configured } = (await getJson("/api/intent")) as { configured?: boolean };
     return configured ? "ok" : "off";
   },
+  // 使わない人も多いので、止まっていても警告にしない。
+  voice: async () => {
+    await getJson(`${VOICEVOX_URL}/version`);
+    return "ok";
+  },
 };
+
+const OPTIONAL = new Set<ServiceId>(["voice"]);
 
 export async function checkServices(): Promise<ServiceStatus[]> {
   return Promise.all(
     SERVICES.map(async (service) => ({
       ...service,
-      state: await checks[service.id]().catch((): ServiceState => "down"),
+      state: await checks[service.id]().catch(
+        (): ServiceState => (OPTIONAL.has(service.id) ? "off" : "down"),
+      ),
     })),
   );
 }

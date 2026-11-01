@@ -10,6 +10,7 @@ type StepsProps = {
   onPurpose: (purpose: string) => void;
   onSelect: (startSec: number) => void;
   onText: (clipId: string, text: string) => void;
+  onSpeak: (text: string) => void;
   onMove: (clipId: string, delta: -1 | 1) => void;
   onDelete: (clipId: string) => void;
 };
@@ -24,6 +25,7 @@ export function Steps({
   onPurpose,
   onSelect,
   onText,
+  onSpeak,
   onMove,
   onDelete,
 }: StepsProps) {
@@ -62,6 +64,16 @@ export function Steps({
                 >
                   {index + 1} · {(endSec - startSec).toFixed(1)}秒
                 </button>
+                {doc.narration.enabled && caption?.text.trim() && (
+                  <button
+                    type="button"
+                    aria-label={`手順 ${index + 1} を読み上げ`}
+                    className={ICON_BUTTON}
+                    onClick={() => onSpeak(caption.text)}
+                  >
+                    試聴
+                  </button>
+                )}
                 <button
                   type="button"
                   aria-label={`手順 ${index + 1} を前へ移動`}

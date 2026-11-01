@@ -1,9 +1,11 @@
 import type { DemoDocument } from "./document";
 import { pickMimeType, seekTo, waitForEvent } from "./media";
+import { prepareNarration } from "./narration";
 import { drawFrame, OUTPUT_HEIGHT, OUTPUT_WIDTH } from "./render";
 import { clipSpans, totalDuration } from "./timeline";
 
 const FPS = 30;
+const LAST_FRAME_MARGIN_SEC = 0.01;
 
 type ExportOptions = {
   doc: DemoDocument;
@@ -18,6 +20,45 @@ async function resumeAudio(audioContext: AudioContext) {
     setTimeout(() => reject(new Error("音声を開始できませんでした。もう一度お試しください。")), 3000);
   });
   await Promise.race([audioContext.resume(), timeout]);
+}
+
+function playVoice(
+  context: AudioContext,
+  buffer: AudioBuffer | undefined,
+  output: AudioNode,
+) {
+  return new Promise<void>((resolve) => {
+    if (!buffer) {
+      resolve();
+      return;
+    }
+    const source = context.createBufferSource();
+    source.buffer = buffer;
+    source.connect(output);
+    source.addEventListener("ended", () => resolve());
+    source.start();
+  });
+}
+
+// 読み上げが手順より長いときは切らず、最後の画面のまま読み終わるのを待つ。
+function holdLastFrame(voiceEnded: Promise<void>, signal: AbortSignal, draw: () => void) {
+  let speaking = true;
+  void voiceEnded.then(() => {
+    speaking = false;
+  });
+  return new Promise<void>((resolve, reject) => {
+    const hold = () => {
+      if (signal.aborted) {
+        reject(new DOMException("書き出しを中止しました。", "AbortError"));
+      } else if (speaking) {
+        draw();
+        requestAnimationFrame(hold);
+      } else {
+        resolve();
+      }
+    };
+    hold();
+  });
 }
 
 // 動画を実際に再生しながら Canvas を録画するので、書き出しには動画と同じ時間がかかる。
@@ -37,7 +78,11 @@ export async function exportVideo({ doc, src, signal, onProgress }: ExportOption
   const audioContext = new AudioContext();
   await resumeAudio(audioContext);
   const audioOutput = audioContext.createMediaStreamDestination();
-  audioContext.createMediaElementSource(video).connect(audioOutput);
+  const narration = await prepareNarration(doc, audioContext, signal);
+  // 接続しないと動画の音がスピーカーへ出るので、消すときは音量 0 を通す。
+  const originalGain = audioContext.createGain();
+  originalGain.gain.value = doc.narration.enabled && !doc.narration.keepOriginalAudio ? 0 : 1;
+  audioContext.createMediaElementSource(video).connect(originalGain).connect(audioOutput);
 
   const stream = new MediaStream([
     ...canvas.captureStream(FPS).getVideoTracks(),
@@ -60,6 +105,7 @@ export async function exportVideo({ doc, src, signal, onProgress }: ExportOption
       else recorder.resume();
 
       await video.play();
+      const voiceEnded = playVoice(audioContext, narration.get(clip.id), audioOutput);
       await new Promise<void>((resolve, reject) => {
         const tick = () => {
           if (signal.aborted) {
@@ -75,6 +121,12 @@ export async function exportVideo({ doc, src, signal, onProgress }: ExportOption
         tick();
       });
       video.pause();
+
+      if (narration.has(clip.id)) {
+        await holdLastFrame(voiceEnded, signal, () =>
+          drawFrame(ctx, video, doc, clip.id, clip.sourceEndSec - LAST_FRAME_MARGIN_SEC),
+        );
+      }
     }
     recorder.stop();
     await stopped;
