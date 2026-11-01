@@ -400,6 +400,7 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
     try {
       const { blob, mimeType } = await exportVideo({
         doc,
+        glossary,
         src: source.url,
         signal: controller.signal,
         onProgress: (ratio) => setExportState({ status: "running", ratio }),
@@ -523,7 +524,7 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
           onPurpose={(purpose) => edit((current) => ({ ...current, purpose }))}
           onSelect={seek}
           onText={(clipId, text) => edit((current) => setStepText(current, clipId, text))}
-          onSpeak={(text) => void speak(doc, text)}
+          onSpeak={(text) => void speak(doc, text, glossary)}
           onMove={(clipId, delta) => edit((current) => moveClip(current, clipId, delta))}
           onDelete={(clipId) => edit((current) => deleteClip(current, clipId))}
         />

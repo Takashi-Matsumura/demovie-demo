@@ -1,4 +1,5 @@
 import type { DemoDocument } from "./document";
+import { applyReadings } from "./glossary";
 import { stepSpans } from "./timeline";
 
 // 手元の VOICEVOX エンジンを直接呼ぶ。説明文はこの PC の外へは出ない。
@@ -69,6 +70,7 @@ export function narratedSteps(doc: DemoDocument) {
 export async function prepareNarration(
   doc: DemoDocument,
   context: BaseAudioContext,
+  glossary: string,
   signal: AbortSignal,
 ) {
   const buffers = new Map<string, AudioBuffer>();
@@ -76,7 +78,7 @@ export async function prepareNarration(
   const { voiceId, speed } = doc.narration;
   for (const { clipId, text } of narratedSteps(doc)) {
     signal.throwIfAborted();
-    const audio = await synthesize(text, voiceId, speed, signal);
+    const audio = await synthesize(applyReadings(text, glossary), voiceId, speed, signal);
     buffers.set(clipId, await context.decodeAudioData(audio.slice(0)));
   }
   return buffers;
