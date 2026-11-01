@@ -7,7 +7,7 @@ function request(
   origin: string | null = "http://localhost:3001",
   host = "localhost:3001",
 ) {
-  const headers: Record<string, string> = { host };
+  const headers: Record<string, string> = { host, "content-type": "application/json" };
   if (origin) headers.origin = origin;
   return new Request("http://localhost:3001/api/intent", {
     method: "POST",
@@ -53,6 +53,31 @@ describe("POST /api/intent", () => {
     vi.stubEnv("TYPESAFE_API_KEY", "test");
     const forged = request({ text: "a" }, "http://localhost:3001", "demovie.example");
     expect((await POST(forged)).status).toBe(403);
+  });
+
+  it("rejects another site on a different local port", async () => {
+    vi.stubEnv("TYPESAFE_API_KEY", "test");
+    expect((await POST(request({ text: "a" }, "http://localhost:3000"))).status).toBe(403);
+  });
+
+  it("rejects bodies that are not JSON", async () => {
+    vi.stubEnv("TYPESAFE_API_KEY", "test");
+    const plain = new Request("http://localhost:3001/api/intent", {
+      method: "POST",
+      headers: {
+        host: "localhost:3001",
+        origin: "http://localhost:3001",
+        "content-type": "text/plain",
+      },
+      body: JSON.stringify({ text: "a" }),
+    });
+    expect((await POST(plain)).status).toBe(415);
+  });
+
+  it("stops trusting localhost once APP_ORIGIN is set", async () => {
+    vi.stubEnv("TYPESAFE_API_KEY", "test");
+    vi.stubEnv("APP_ORIGIN", "https://demovie.example");
+    expect((await POST(request({ text: "a" }))).status).toBe(403);
   });
 
   it("allows a deployment only through APP_ORIGIN", async () => {

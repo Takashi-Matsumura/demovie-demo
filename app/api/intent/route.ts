@@ -15,31 +15,23 @@ const responseSchema = z.object({
 
 const LOCAL_HOSTNAMES = ["localhost", "127.0.0.1", "[::1]"];
 
-function isAllowedOrigin(origin: string) {
-  if (!URL.canParse(origin)) return false;
-  const url = new URL(origin);
-  return LOCAL_HOSTNAMES.includes(url.hostname) || url.origin === process.env.APP_ORIGIN;
-}
-
-function isAllowedHost(host: string) {
-  const { hostname } = new URL(`http://${host}`);
-  const appOrigin = process.env.APP_ORIGIN;
-  return (
-    LOCAL_HOSTNAMES.includes(hostname) || (!!appOrigin && new URL(appOrigin).host === host)
-  );
-}
-
-// API キーを持つのはサーバ側だけ。Origin と Host を比べるだけだと DNS リバインディングで
-// 攻撃者のサイトでも一致するので、サーバ側で決めた許可先と照合する。
+// API キーを持つのはサーバ側だけ。Origin と Host の一致で別のポートのサイトを、
+// 許可先との照合で DNS リバインディングを防ぐ。両方そろわないと通さない。
 function isTrusted(request: Request) {
   const origin = request.headers.get("origin");
-  const host = request.headers.get("host");
-  if (!origin || !host || !URL.canParse(`http://${host}`)) return false;
-  return isAllowedOrigin(origin) && isAllowedHost(host);
+  if (!origin || !URL.canParse(origin)) return false;
+  const url = new URL(origin);
+  if (url.host !== request.headers.get("host")) return false;
+  const appOrigin = process.env.APP_ORIGIN;
+  return appOrigin ? url.origin === appOrigin : LOCAL_HOSTNAMES.includes(url.hostname);
 }
 
 export async function POST(request: Request) {
   if (!isTrusted(request)) return Response.json({ error: "forbidden" }, { status: 403 });
+  // JSON に限ると、他のサイトからの送信にはブラウザの事前確認が必要になる。
+  if (!request.headers.get("content-type")?.startsWith("application/json")) {
+    return Response.json({ error: "unsupported_media_type" }, { status: 415 });
+  }
 
   const apiKey = process.env.TYPESAFE_API_KEY;
   if (!apiKey) return Response.json({ error: "not_configured" }, { status: 503 });
