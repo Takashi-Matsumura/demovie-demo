@@ -43,8 +43,8 @@ export function buildPrompt(purpose: string, glossary = "") {
   return `${heading}${PROMPT}${glossarySection}`;
 }
 
-export type Sample = { sec: number; ratio: number };
-export type Operation = { beforeSec: number; afterSec: number };
+export type Sample = { sec: number; ratio: number; baselineSec?: number };
+export type Operation = { beforeSec: number; afterSec: number; referenceSec?: number };
 
 export function changedRatio(previous: Uint8ClampedArray, current: Uint8ClampedArray) {
   let changed = 0;
@@ -109,10 +109,30 @@ export function findOperations(samples: Sample[]) {
     ) {
       last.afterSec = sample.sec;
     } else {
-      operations.push({ beforeSec: previous.sec, afterSec: sample.sec });
+      const { baselineSec } = sample;
+      operations.push({
+        beforeSec: previous.sec,
+        afterSec: sample.sec,
+        ...(baselineSec !== undefined && { referenceSec: baselineSec }),
+      });
     }
   });
   return operations;
+}
+
+// 直前のコマとだけ比べると、1 文字ずつの入力は毎回の変化が小さくて見逃す。
+// 操作を検出した時点の画面と比べ続ければ、入力は積み上がり、カーソルの移動は積み上がらない。
+export function compareToBaseline(
+  baseline: { sec: number; signature: Uint8ClampedArray } | null,
+  sec: number,
+  signature: Uint8ClampedArray,
+) {
+  if (!baseline) return { sample: { sec, ratio: 0 }, baseline: { sec, signature } };
+  const ratio = changedRatio(baseline.signature, signature);
+  return {
+    sample: { sec, ratio, baselineSec: baseline.sec },
+    baseline: ratio >= CHANGE_RATIO ? { sec, signature } : baseline,
+  };
 }
 
 const QUOTE_PAIRS: Record<string, string> = { "「": "」", "『": "』", '"': '"' };
@@ -224,13 +244,13 @@ export async function generateCaptions({
     const found: { clip: Clip; operation: Operation; endSec: number }[] = [];
     for (const clip of doc.clips) {
       const samples: Sample[] = [];
-      let previous: Uint8ClampedArray | null = null;
+      let baseline: Parameters<typeof compareToBaseline>[0] = null;
       for (const sec of sampleTimes(clip)) {
         signal.throwIfAborted();
         await seekTo(video, sec);
-        const signature: Uint8ClampedArray = signatureOf(ctx, video);
-        samples.push({ sec, ratio: previous ? changedRatio(previous, signature) : 0 });
-        previous = signature;
+        const compared = compareToBaseline(baseline, sec, signatureOf(ctx, video));
+        samples.push(compared.sample);
+        baseline = compared.baseline;
       }
       const operations = findOperations(samples);
       operations.forEach((operation, index) => {
@@ -245,7 +265,7 @@ export async function generateCaptions({
     for (const [index, { clip, operation, endSec }] of found.entries()) {
       signal.throwIfAborted();
       onProgress(`キャプションを生成中 ${index + 1} / ${found.length}`);
-      await seekTo(video, operation.beforeSec);
+      await seekTo(video, operation.referenceSec ?? operation.beforeSec);
       const before = frameUrl(video);
       const beforeSignature: Uint8ClampedArray = signatureOf(ctx, video);
       const settled = operation.afterSec + SETTLE_SEC;

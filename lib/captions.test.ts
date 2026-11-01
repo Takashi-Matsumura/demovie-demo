@@ -4,6 +4,7 @@ import {
   changedRatio,
   changedRegion,
   cleanCaption,
+  compareToBaseline,
   findOperations,
   suggestZoom,
   type Sample,
@@ -42,6 +43,41 @@ describe("findOperations", () => {
 
   it("does not treat the first sample as a change", () => {
     expect(findOperations(samples([0.5, 0, 0]))).toEqual([]);
+  });
+});
+
+describe("compareToBaseline", () => {
+  const SIZE = 2000;
+  const frame = (changed: number[]) => {
+    const pixels = new Uint8ClampedArray(SIZE);
+    changed.forEach((index) => {
+      pixels[index] = 255;
+    });
+    return pixels;
+  };
+  const run = (frames: Uint8ClampedArray[]) => {
+    let baseline: Parameters<typeof compareToBaseline>[0] = null;
+    return frames.map((signature, sec) => {
+      const compared = compareToBaseline(baseline, sec, signature);
+      baseline = compared.baseline;
+      return compared.sample;
+    });
+  };
+
+  it("adds up small changes such as slow typing", () => {
+    const steps = run([frame([]), frame([1]), frame([1, 2])]);
+    expect(findOperations(steps)).toEqual([{ beforeSec: 1, afterSec: 2, referenceSec: 0 }]);
+  });
+
+  it("does not add up a cursor that only moves around", () => {
+    const steps = run([frame([]), frame([1]), frame([50]), frame([100]), frame([150])]);
+    expect(findOperations(steps)).toEqual([]);
+  });
+
+  it("starts over from the screen after an operation", () => {
+    const after = frame([1, 2, 3]);
+    const steps = run([frame([]), after, after, after]);
+    expect(findOperations(steps)).toEqual([{ beforeSec: 0, afterSec: 1, referenceSec: 0 }]);
   });
 });
 
