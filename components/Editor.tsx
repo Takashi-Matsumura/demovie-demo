@@ -35,6 +35,7 @@ import {
   captionAt,
   captionBounds,
   captionSpans,
+  clipSpans,
   deleteClip,
   locate,
   moveClip,
@@ -60,6 +61,7 @@ import { Steps } from "./Steps";
 import { useGlossary } from "./useGlossary";
 import { useSpeech } from "./useSpeech";
 import { useThumbnails } from "./useThumbnails";
+import { useVoicePlayback } from "./useVoicePlayback";
 import { Timeline } from "./Timeline";
 import { useDocument } from "./useDocument";
 import { usePlayer } from "./usePlayer";
@@ -342,13 +344,14 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const captionAbortRef = useRef<AbortController | null>(null);
-  const { timeSec, playing, seek, toggle } = usePlayer(doc, videoRef, canvasRef);
+  const [glossary, setGlossary] = useGlossary();
+  const { voiceRef, activate, preparing, error: voiceError } = useVoicePlayback(doc, glossary, videoRef);
+  const { timeSec, playing, seek, toggle } = usePlayer(doc, videoRef, canvasRef, voiceRef);
   const [exportState, setExportState] = useState<ExportState>({ status: "idle" });
   const [captionState, setCaptionState] = useState<CaptionState>({ status: "idle" });
   const [timelineOpen, setTimelineOpen] = useState(false);
   const [blurring, setBlurring] = useState(false);
   const [dragBox, setDragBox] = useState<DragBox | null>(null);
-  const [glossary, setGlossary] = useGlossary();
   const thumbnailOf = useThumbnails(doc, source.url);
   const { speak, error: speechError } = useSpeech();
   const [saveFailed, setSaveFailed] = useState(false);
@@ -451,6 +454,11 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
     setBlurring(false);
   };
 
+  const playNarrated = async () => {
+    seek(clipSpans(doc).find((span) => span.clip.id === currentClip.id)?.startSec ?? 0);
+    if (await activate()) await toggle();
+  };
+
   const startCaptions = async () => {
     if (playing) void toggle();
     const controller = new AbortController();
@@ -510,9 +518,9 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
       <ServiceStatusBar />
       <ExportStatus state={exportState} />
       <CaptionStatus state={captionState} />
-      {speechError && (
+      {(speechError ?? voiceError) && (
         <p role="alert" className="text-sm text-danger">
-          {speechError}
+          {speechError ?? voiceError}
         </p>
       )}
 
@@ -576,6 +584,16 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
             <button type="button" className={PRIMARY} disabled={exporting} onClick={toggle}>
               {playing ? "一時停止" : "再生"}
             </button>
+            {doc.narration.enabled && !playing && (
+              <button
+                type="button"
+                className={BUTTON}
+                disabled={exporting || preparing}
+                onClick={() => void playNarrated()}
+              >
+                {preparing ? "音声を準備中…" : "ナレーション付きで再生"}
+              </button>
+            )}
             <span className="font-mono text-sm text-ink-2 tabular-nums">
               {formatTime(timeSec)} / {formatTime(totalDuration(doc))}
             </span>
