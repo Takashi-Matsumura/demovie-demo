@@ -1,5 +1,7 @@
 "use client";
 
+import { useState, type FormEvent } from "react";
+
 export type ReviewItem = {
   id: string;
   sourceSec: number;
@@ -9,6 +11,8 @@ export type ReviewItem = {
   summary: string;
   selected: boolean;
   applicable: boolean;
+  question: string;
+  answering: boolean;
 };
 
 export type ReviewStage = "listening" | "interpreting" | "ready";
@@ -17,10 +21,39 @@ type ReviewPanelProps = {
   stage: ReviewStage;
   items: ReviewItem[];
   onToggle: (id: string) => void;
+  onAnswer: (id: string, answer: string) => void;
   onFinish: () => void;
   onApply: () => void;
   onCancel: () => void;
 };
+
+function AnswerForm({ item, onAnswer }: { item: ReviewItem; onAnswer: ReviewPanelProps["onAnswer"] }) {
+  const [text, setText] = useState("");
+
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    const answer = text.trim();
+    if (!answer || item.answering) return;
+    setText("");
+    onAnswer(item.id, answer);
+  };
+
+  return (
+    <form onSubmit={submit} className="mt-1 flex gap-2">
+      <input
+        aria-label={`${item.label} の質問への答え`}
+        className="min-w-0 flex-1 rounded bg-paper-3 px-2 py-1"
+        placeholder="答えを入力"
+        value={text}
+        disabled={item.answering}
+        onChange={(event) => setText(event.target.value)}
+      />
+      <button type="submit" disabled={item.answering} className={BUTTON}>
+        {item.answering ? "解釈中…" : "答える"}
+      </button>
+    </form>
+  );
+}
 
 const BUTTON = "rounded-md bg-paper-3 px-3 py-1.5 text-sm whitespace-nowrap hover:bg-rule";
 
@@ -28,6 +61,7 @@ export function ReviewPanel({
   stage,
   items,
   onToggle,
+  onAnswer,
   onFinish,
   onApply,
   onCancel,
@@ -66,7 +100,7 @@ export function ReviewPanel({
         <ul className="flex flex-col gap-1">
           {items.map((item) => (
             <li key={item.id}>
-              <label className="flex items-start gap-2 rounded bg-paper-2 p-2">
+              <div className="flex items-start gap-2 rounded bg-paper-2 p-2">
                 <input
                   type="checkbox"
                   className="mt-0.5 size-4 accent-accent"
@@ -75,7 +109,7 @@ export function ReviewPanel({
                   disabled={stage !== "ready" || !item.applicable}
                   onChange={() => onToggle(item.id)}
                 />
-                <span className="flex min-w-0 flex-col">
+                <span className="flex min-w-0 flex-1 flex-col">
                   <span className="text-ink-2">
                     {item.label}
                     {item.transcript ? `「${item.transcript}」` : "（聞き取り中…）"}
@@ -84,8 +118,14 @@ export function ReviewPanel({
                     <span className="text-ink-2">独り言と判断しました。適用するなら選んでください。</span>
                   )}
                   {item.summary && <span>{item.summary}</span>}
+                  {stage === "ready" && item.question && (
+                    <>
+                      <span>{item.question}</span>
+                      <AnswerForm item={item} onAnswer={onAnswer} />
+                    </>
+                  )}
                 </span>
-              </label>
+              </div>
             </li>
           ))}
         </ul>

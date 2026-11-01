@@ -37,6 +37,7 @@ type AssistantProps = {
   src: string;
   timeSec: number;
   glossary: string;
+  ended: boolean;
   disabled: boolean;
   onListen: () => void;
   onApply: (result: Extract<CommandResult, { kind: "applied" }>) => void;
@@ -49,6 +50,7 @@ export function Assistant({
   src,
   timeSec,
   glossary,
+  ended,
   disabled,
   onListen,
   onApply,
@@ -212,6 +214,8 @@ export function Assistant({
         summary: "",
         selected: false,
         applicable: false,
+        question: "",
+        answering: false,
       };
       updateReviewItems((items) => [...items, item]);
       setPhase("idle");
@@ -288,52 +292,86 @@ export function Assistant({
     setStage(null);
   };
 
-  // 手順番号が変わらないよう、指示は確認を終えてからまとめて解釈し、適用まで編集には触れない。
-  const finishReview = async () => {
-    const signal = reviewControllerRef.current?.signal;
-    if (!signal) return;
-    onListen();
-    setStage("interpreting");
-    await Promise.all(reviewPendingRef.current);
-    const { doc: current } = latestRef.current;
+  const patchReviewItem = useCallback(
+    (id: string, values: Partial<ReviewItem>) =>
+      updateReviewItems((items) =>
+        items.map((item) => (item.id === id ? { ...item, ...values } : item)),
+      ),
+    [updateReviewItems],
+  );
 
-    for (const item of reviewItemsRef.current) {
-      if (signal.aborted) return;
-      if (item.state !== "instruction" && item.state !== "chatter") continue;
-      const patch = (values: Partial<ReviewItem>) =>
-        updateReviewItems((items) =>
-          items.map((other) => (other.id === item.id ? { ...other, ...values } : other)),
-        );
+  const interpretReviewItem = useCallback(
+    async (item: ReviewItem, transcript: string, question: string | null, signal: AbortSignal) => {
+      const { doc: current, glossary: terms } = latestRef.current;
       const itemSec = timelineAt(current, item.sourceSec) ?? 0;
       try {
         const commands = await interpret({
-          transcript: item.transcript,
-          glossary: latestRef.current.glossary,
+          transcript,
+          glossary: terms,
           doc: current,
           timeSec: itemSec,
-          previousQuestion: null,
+          previousQuestion: question,
           signal,
         });
         const resolved = await resolveTargets(commands, src, item.sourceSec, signal);
         const result = applyCommands(current, resolved, itemSec);
         if (result.kind === "applied") {
           reviewCommandsRef.current.set(item.id, resolved);
-          patch({
+          patchReviewItem(item.id, {
             summary: result.message,
             applicable: true,
-            selected: item.state === "instruction",
+            selected: item.state === "instruction" || question !== null,
+            question: "",
           });
+        } else if (result.kind === "question") {
+          patchReviewItem(item.id, { summary: "", question: result.question });
         } else if (result.kind === "undo") {
-          patch({ summary: "「元に戻す」は通しの確認では実行できません。" });
+          patchReviewItem(item.id, {
+            summary: "「元に戻す」は通しの確認では実行できません。",
+            question: "",
+          });
         } else {
-          patch({ summary: result.kind === "question" ? result.question : result.message });
+          patchReviewItem(item.id, { summary: result.message, question: "" });
         }
       } catch (cause) {
         if (signal.aborted) return;
-        patch({ summary: cause instanceof Error ? cause.message : "解釈できませんでした。" });
+        patchReviewItem(item.id, {
+          summary: cause instanceof Error ? cause.message : "解釈できませんでした。",
+        });
       }
+    },
+    [patchReviewItem, src],
+  );
+
+  // 手順番号が変わらないよう、指示は確認を終えてからまとめて解釈し、適用まで編集には触れない。
+  const finishReview = useCallback(async () => {
+    const signal = reviewControllerRef.current?.signal;
+    if (!signal || reviewStageRef.current !== "listening") return;
+    onListen();
+    setStage("interpreting");
+    await Promise.all(reviewPendingRef.current);
+
+    for (const item of reviewItemsRef.current) {
+      if (signal.aborted) return;
+      if (item.state !== "instruction" && item.state !== "chatter") continue;
+      await interpretReviewItem(item, item.transcript, null, signal);
     }
     setStage("ready");
+  }, [interpretReviewItem, onListen, setStage]);
+
+  // 最後まで再生したら、確認を終えるボタンを押さなくても次へ進む。
+  useEffect(() => {
+    if (ended && reviewStage === "listening" && phase === "idle") void finishReview();
+  }, [ended, finishReview, phase, reviewStage]);
+
+  const answerReview = async (id: string, answer: string) => {
+    const signal = reviewControllerRef.current?.signal;
+    const item = reviewItemsRef.current.find((other) => other.id === id);
+    if (!signal || !item) return;
+    patchReviewItem(id, { answering: true });
+    const context = `${item.transcript}\n答え: ${answer}`;
+    await interpretReviewItem(item, context, item.question, signal);
+    patchReviewItem(id, { answering: false });
   };
 
   const applySelected = () => {
@@ -452,6 +490,7 @@ export function Assistant({
               ),
             )
           }
+          onAnswer={(id, answer) => void answerReview(id, answer)}
           onFinish={() => void finishReview()}
           onApply={applySelected}
           onCancel={closeReview}
