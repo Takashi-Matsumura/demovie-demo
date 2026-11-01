@@ -54,6 +54,7 @@ import {
 } from "@/lib/timeline";
 import { Assistant } from "./Assistant";
 import { Inspector } from "./Inspector";
+import { ServiceStatusBar } from "./ServiceStatus";
 import { Steps } from "./Steps";
 import { useGlossary } from "./useGlossary";
 import { useThumbnails } from "./useThumbnails";
@@ -501,6 +502,7 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
         )}
       </header>
 
+      <ServiceStatusBar />
       <ExportStatus state={exportState} />
       <CaptionStatus state={captionState} />
 
