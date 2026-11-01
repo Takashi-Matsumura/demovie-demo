@@ -16,6 +16,7 @@ const SETTLE_SEC = 0.5;
 const HOLD_SEC = 1.5;
 const END_MARGIN_SEC = 0.05;
 const FRAME_WIDTH = 1024;
+const FIRST_READ_SEC = 0.01;
 // 外れ値を落とす割合。離れた場所のカーソル移動で範囲が広がるのを防ぐ。
 const REGION_TRIM = 0.1;
 // これより広い変化は画面遷移とみなし、拡大しない。
@@ -25,7 +26,7 @@ const MAX_ZOOM_DEPTH = 2.2;
 const REGION_FILL = 0.8;
 const MIN_AUTO_ZOOM_SEC = 1;
 
-const PROMPT = `1枚目は操作の前、2枚目は操作の後の画面です。ユーザーが行った操作を、操作説明動画の手順として日本語で1文にしてください。
+const PROMPT = `操作の後の画面で新しく表示された内容を重視して、ユーザーが行った操作を、操作説明動画の手順として日本語で1文にしてください。
 ・「〜を開きます」「〜を設定します」のように、30字以内の丁寧語で書く
 ・画面に実際に見える文字を根拠にし、推測で固有名詞を足さない
 ・説明文だけを出力する`;
@@ -150,7 +151,14 @@ async function describe(before: string, after: string, prompt: string, signal: A
         messages: [
           {
             role: "user",
-            content: [image(before), image(after), { type: "text", text: prompt }],
+            // 画像の順番だけで前後を伝えると、操作の後の画面を無視しやすい。
+            content: [
+              { type: "text", text: "操作の前の画面:" },
+              image(before),
+              { type: "text", text: "操作の後の画面:" },
+              image(after),
+              { type: "text", text: prompt },
+            ],
           },
         ],
         max_tokens: 80,
@@ -191,6 +199,8 @@ export async function generateCaptions({ doc, src, signal, onProgress }: Generat
   await loaded;
 
   try {
+    // 読み込み直後の最初の読み取りが黒くなり、全画面の変化と誤判定することがある。
+    await seekTo(video, FIRST_READ_SEC);
     const found: { clip: Clip; operation: Operation; endSec: number }[] = [];
     for (const clip of doc.clips) {
       const samples: Sample[] = [];
