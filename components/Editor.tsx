@@ -56,6 +56,7 @@ import { Assistant } from "./Assistant";
 import { Inspector } from "./Inspector";
 import { Steps } from "./Steps";
 import { useGlossary } from "./useGlossary";
+import { useThumbnails } from "./useThumbnails";
 import { Timeline } from "./Timeline";
 import { useDocument } from "./useDocument";
 import { usePlayer } from "./usePlayer";
@@ -344,6 +345,7 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
   const [blurring, setBlurring] = useState(false);
   const [dragBox, setDragBox] = useState<DragBox | null>(null);
   const [glossary, setGlossary] = useGlossary();
+  const thumbnailOf = useThumbnails(doc, source.url);
   const [saveFailed, setSaveFailed] = useState(false);
 
   // 編集対象のズームとキャプションは選択状態を持たず、再生位置から決める。
@@ -506,6 +508,7 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
         <Steps
           doc={doc}
           currentClipId={currentClip.id}
+          thumbnailOf={thumbnailOf}
           onPurpose={(purpose) => edit((current) => ({ ...current, purpose }))}
           onSelect={seek}
           onText={(clipId, text) => edit((current) => setStepText(current, clipId, text))}

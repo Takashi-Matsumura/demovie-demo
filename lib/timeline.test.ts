@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createDocument, documentSchema, newId, type DemoDocument } from "./document";
-import { mosaicGrid } from "./render";
+import { mosaicGrid, thumbnailDoc, thumbnailSec } from "./render";
 import {
   addBlur,
   addCaption,
@@ -317,14 +317,34 @@ describe("blurs", () => {
   });
 
   it("sizes mosaic blocks by the recording, not the zoomed output", () => {
-    expect(mosaicGrid(380, 100, 1920)).toEqual({ columns: 10, rows: 3 });
-    expect(mosaicGrid(5, 5, 1920)).toEqual({ columns: 1, rows: 1 });
+    expect(mosaicGrid(380, 100, 1920, 1080)).toEqual({ columns: 9, rows: 2 });
+    expect(mosaicGrid(5, 5, 1920, 1080)).toEqual({ columns: 1, rows: 1 });
+  });
+
+  it("keeps mosaic blocks large on portrait and small recordings", () => {
+    const portrait = mosaicGrid(1080, 400, 1080, 1920);
+    expect(1080 / portrait.columns).toBeGreaterThanOrEqual(1920 * (16 / 9) * 0.02);
+    expect(mosaicGrid(320, 160, 320, 180)).toEqual({ columns: 20, rows: 10 });
   });
 
   it("opens work saved before blurs existed", () => {
     const saved: Record<string, unknown> = { ...makeDoc() };
     delete saved.blurs;
     expect(documentSchema.parse(saved).blurs).toEqual([]);
+  });
+});
+
+describe("thumbnails", () => {
+  it("shows the screen shortly after the step begins", () => {
+    expect(thumbnailSec({ sourceStartSec: 2, sourceEndSec: 9 })).toBe(3);
+    expect(thumbnailSec({ sourceStartSec: 2, sourceEndSec: 3 })).toBe(2.5);
+  });
+
+  it("keeps blurs while dropping the frame around the video", () => {
+    const doc = addBlur(makeDoc(), { x: 0, y: 0, width: 0.5, height: 0.5 });
+    const plain = thumbnailDoc(doc);
+    expect(plain.blurs).toEqual(doc.blurs);
+    expect(plain.look.paddingPct).toBe(0);
   });
 });
 

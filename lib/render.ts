@@ -18,6 +18,7 @@ export const BACKGROUNDS: Record<
 // 文字を読み取れないよう、1 ブロックを本文の文字より大きくする。
 // 大きさは録画の幅が基準。出力側で決めると、ズームするほど元の映像の情報が残る。
 const MOSAIC_BLOCK_RATIO = 0.02;
+const MIN_MOSAIC_BLOCK = 16;
 
 type Rect = { x: number; y: number; width: number; height: number };
 
@@ -66,12 +67,35 @@ export function previewToVideo(
 }
 
 // ブロックの区切りは録画の座標に固定する。ズームで動くと、コマを重ねて元の内容を推測されやすい。
-export function mosaicGrid(blurWidth: number, blurHeight: number, videoWidth: number) {
-  const block = videoWidth * MOSAIC_BLOCK_RATIO;
+// 縦長や低解像度の録画でも弱くならないよう、基準は 16:9 換算の幅にして下限も設ける。
+// 切り捨てで分割するので、実際のブロックが基準より小さくなることはない。
+export function mosaicGrid(
+  blurWidth: number,
+  blurHeight: number,
+  videoWidth: number,
+  videoHeight: number,
+) {
+  const block = Math.max(
+    Math.max(videoWidth, (videoHeight * 16) / 9) * MOSAIC_BLOCK_RATIO,
+    MIN_MOSAIC_BLOCK,
+  );
   return {
-    columns: Math.max(1, Math.ceil(blurWidth / block)),
-    rows: Math.max(1, Math.ceil(blurHeight / block)),
+    columns: Math.max(1, Math.floor(blurWidth / block)),
+    rows: Math.max(1, Math.floor(blurHeight / block)),
   };
+}
+
+const THUMBNAIL_OFFSET_SEC = 1;
+
+// 手順の冒頭は操作の前の画面なので、少し進めた時点を代表の画面にする。
+export function thumbnailSec(clip: { sourceStartSec: number; sourceEndSec: number }) {
+  const middle = (clip.sourceStartSec + clip.sourceEndSec) / 2;
+  return Math.min(clip.sourceStartSec + THUMBNAIL_OFFSET_SEC, middle);
+}
+
+// 画面を大きく見せるため、背景の余白をなくす。モザイクはそのまま残す。
+export function thumbnailDoc(doc: DemoDocument): DemoDocument {
+  return { ...doc, look: { ...doc.look, paddingPct: 0, radiusPct: 0, shadow: false } };
 }
 
 let mosaicCanvas: HTMLCanvasElement | null = null;
@@ -102,7 +126,7 @@ function drawBlurs(
     const bottom = Math.min(blurY + blurHeight, crop.y + crop.height);
     if (right <= left || bottom <= top) continue;
 
-    const { columns, rows } = mosaicGrid(blurWidth, blurHeight, vw);
+    const { columns, rows } = mosaicGrid(blurWidth, blurHeight, vw, vh);
     mosaicCanvas.width = columns;
     mosaicCanvas.height = rows;
     mosaic.drawImage(video, blurX, blurY, blurWidth, blurHeight, 0, 0, columns, rows);

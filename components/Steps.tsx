@@ -6,6 +6,7 @@ import { stepSpans } from "@/lib/timeline";
 type StepsProps = {
   doc: DemoDocument;
   currentClipId: string;
+  thumbnailOf: (clip: { sourceStartSec: number; sourceEndSec: number }) => string | undefined;
   onPurpose: (purpose: string) => void;
   onSelect: (startSec: number) => void;
   onText: (clipId: string, text: string) => void;
@@ -19,6 +20,7 @@ const ICON_BUTTON =
 export function Steps({
   doc,
   currentClipId,
+  thumbnailOf,
   onPurpose,
   onSelect,
   onText,
@@ -88,17 +90,31 @@ export function Steps({
                   削除
                 </button>
               </div>
-              <textarea
-                aria-label={`手順 ${index + 1} の説明文`}
-                rows={2}
-                className="w-full resize-none rounded bg-paper-2 p-2 text-sm"
-                placeholder="説明文を入力"
-                value={caption?.text ?? ""}
-                onFocus={() => {
-                  if (clip.id !== currentClipId) onSelect(startSec);
-                }}
-                onChange={(event) => onText(clip.id, event.target.value)}
-              />
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  aria-label={`手順 ${index + 1} の画面へ移動`}
+                  className="aspect-video w-20 shrink-0 self-start overflow-hidden rounded bg-paper-2"
+                  onClick={() => onSelect(startSec)}
+                >
+                  {thumbnailOf(clip) && (
+                    // 生成した data URL なので next/image の最適化は使えない。
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={thumbnailOf(clip)} alt="" className="size-full object-cover" />
+                  )}
+                </button>
+                <textarea
+                  aria-label={`手順 ${index + 1} の説明文`}
+                  rows={2}
+                  className="min-w-0 flex-1 resize-none rounded bg-paper-2 p-2 text-sm"
+                  placeholder="説明文を入力"
+                  value={caption?.text ?? ""}
+                  onFocus={() => {
+                    if (clip.id !== currentClipId) onSelect(startSec);
+                  }}
+                  onChange={(event) => onText(clip.id, event.target.value)}
+                />
+              </div>
             </li>
           ))}
         </ol>
