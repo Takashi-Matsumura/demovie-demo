@@ -4,8 +4,8 @@ import {
   changedRatio,
   changedRegion,
   cleanCaption,
-  compareToBaseline,
   findOperations,
+  sampleChanges,
   suggestZoom,
   type Sample,
 } from "./captions";
@@ -46,8 +46,11 @@ describe("findOperations", () => {
   });
 });
 
-describe("compareToBaseline", () => {
-  const SIZE = 2000;
+describe("sampleChanges", () => {
+  // 基準は 0.1% なので 20 マス。カーソルは実測と同じく、1 か所で基準の半分ほどにする。
+  const SIZE = 20000;
+  const cells = (start: number, length: number) =>
+    Array.from({ length }, (_, index) => start + index);
   const frame = (changed: number[]) => {
     const pixels = new Uint8ClampedArray(SIZE);
     changed.forEach((index) => {
@@ -55,29 +58,32 @@ describe("compareToBaseline", () => {
     });
     return pixels;
   };
-  const run = (frames: Uint8ClampedArray[]) => {
-    let baseline: Parameters<typeof compareToBaseline>[0] = null;
-    return frames.map((signature, sec) => {
-      const compared = compareToBaseline(baseline, sec, signature);
-      baseline = compared.baseline;
-      return compared.sample;
-    });
-  };
+  const run = (frames: Uint8ClampedArray[]) =>
+    findOperations(sampleChanges(frames.map((signature, sec) => ({ sec, signature }))));
 
   it("adds up small changes such as slow typing", () => {
-    const steps = run([frame([]), frame([1]), frame([1, 2])]);
-    expect(findOperations(steps)).toEqual([{ beforeSec: 1, afterSec: 2, referenceSec: 0 }]);
+    const typed = [0, 10, 20, 20, 20].map((length) => frame(cells(0, length)));
+    expect(run(typed)).toEqual([{ beforeSec: 1, afterSec: 2, referenceSec: 0 }]);
   });
 
-  it("does not add up a cursor that only moves around", () => {
-    const steps = run([frame([]), frame([1]), frame([50]), frame([100]), frame([150])]);
-    expect(findOperations(steps)).toEqual([]);
+  it("ignores a cursor that keeps moving", () => {
+    const moving = [0, 100, 200, 300, 400, 500].map((start) => frame(cells(start, 10)));
+    expect(run(moving)).toEqual([]);
   });
 
-  it("starts over from the screen after an operation", () => {
-    const after = frame([1, 2, 3]);
-    const steps = run([frame([]), after, after, after]);
-    expect(findOperations(steps)).toEqual([{ beforeSec: 0, afterSec: 1, referenceSec: 0 }]);
+  it("detects a change that stays on screen", () => {
+    const after = frame(cells(0, 30));
+    expect(run([frame([]), after, after, after])).toEqual([
+      { beforeSec: 0, afterSec: 1, referenceSec: 0 },
+    ]);
+  });
+
+  it("does not trust a change it cannot confirm on the last sample", () => {
+    expect(run([frame([]), frame([]), frame(cells(0, 30))])).toEqual([]);
+  });
+
+  it("handles a single frame", () => {
+    expect(run([frame([])])).toEqual([]);
   });
 });
 

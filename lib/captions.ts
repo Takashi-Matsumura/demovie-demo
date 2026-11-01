@@ -120,19 +120,36 @@ export function findOperations(samples: Sample[]) {
   return operations;
 }
 
-// 直前のコマとだけ比べると、1 文字ずつの入力は毎回の変化が小さくて見逃す。
-// 操作を検出した時点の画面と比べ続ければ、入力は積み上がり、カーソルの移動は積み上がらない。
-export function compareToBaseline(
-  baseline: { sec: number; signature: Uint8ClampedArray } | null,
-  sec: number,
-  signature: Uint8ClampedArray,
+export type SignatureFrame = { sec: number; signature: Uint8ClampedArray };
+
+// 基準の画面から変わったままのマスだけを数える。動き続けるカーソルは次のコマで別の場所へ
+// 移るので数えられず、入力や画面の切り替えは残るので数えられる。
+function persistentRatio(
+  baseline: Uint8ClampedArray,
+  current: Uint8ClampedArray,
+  next: Uint8ClampedArray,
 ) {
-  if (!baseline) return { sample: { sec, ratio: 0 }, baseline: { sec, signature } };
-  const ratio = changedRatio(baseline.signature, signature);
-  return {
-    sample: { sec, ratio, baselineSec: baseline.sec },
-    baseline: ratio >= CHANGE_RATIO ? { sec, signature } : baseline,
-  };
+  let changed = 0;
+  for (let index = 0; index < current.length; index += 1) {
+    const moved = Math.abs(current[index] - baseline[index]) > PIXEL_THRESHOLD;
+    if (moved && Math.abs(next[index] - baseline[index]) > PIXEL_THRESHOLD) changed += 1;
+  }
+  return changed / current.length;
+}
+
+// 直前のコマとだけ比べると、1 文字ずつの入力は毎回の変化が小さくて見逃すので、
+// 操作を検出した時点の画面と比べ続けて変化を積み上げる。
+export function sampleChanges(frames: SignatureFrame[]) {
+  let baseline = frames[0];
+  return frames.map(({ sec, signature }, index): Sample => {
+    // 最後のコマは残るかどうかを確かめられないので、カーソルを誤検出しないよう数えない。
+    const next = frames[index + 1]?.signature;
+    if (index === 0 || !next) return { sec, ratio: 0 };
+    const ratio = persistentRatio(baseline.signature, signature, next);
+    const sample = { sec, ratio, baselineSec: baseline.sec };
+    if (ratio >= CHANGE_RATIO) baseline = frames[index];
+    return sample;
+  });
 }
 
 const QUOTE_PAIRS: Record<string, string> = { "「": "」", "『": "』", '"': '"' };
@@ -243,16 +260,13 @@ export async function generateCaptions({
     await seekTo(video, FIRST_READ_SEC);
     const found: { clip: Clip; operation: Operation; endSec: number }[] = [];
     for (const clip of doc.clips) {
-      const samples: Sample[] = [];
-      let baseline: Parameters<typeof compareToBaseline>[0] = null;
+      const frames: SignatureFrame[] = [];
       for (const sec of sampleTimes(clip)) {
         signal.throwIfAborted();
         await seekTo(video, sec);
-        const compared = compareToBaseline(baseline, sec, signatureOf(ctx, video));
-        samples.push(compared.sample);
-        baseline = compared.baseline;
+        frames.push({ sec, signature: signatureOf(ctx, video) });
       }
-      const operations = findOperations(samples);
+      const operations = findOperations(sampleChanges(frames));
       operations.forEach((operation, index) => {
         const next = operations[index + 1]?.beforeSec ?? clip.sourceEndSec;
         found.push({ clip, operation, endSec: Math.min(operation.afterSec + HOLD_SEC, next) });
