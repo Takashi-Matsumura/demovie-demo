@@ -19,6 +19,14 @@ export function formatGlossary(text: string) {
     .join("\n");
 }
 
+// 長い語を先に置き換える。「会計freee」と「freee」のように重なる語を正しく読ませるため。
+export function applyReadings(text: string, glossary: string) {
+  return parseGlossary(glossary)
+    .filter(({ reading }) => reading)
+    .sort((a, b) => b.term.length - a.term.length)
+    .reduce((result, { term, reading }) => result.replaceAll(term, reading), text);
+}
+
 // 保存できない環境でも編集は続けられるので、読み書きの失敗は無視する。
 export function loadGlossary() {
   try {

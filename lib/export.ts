@@ -10,6 +10,7 @@ const FRAME_SEC = 1 / FPS;
 
 type ExportOptions = {
   doc: DemoDocument;
+  glossary: string;
   src: string;
   signal: AbortSignal;
   onProgress: (ratio: number) => void;
@@ -63,7 +64,7 @@ function holdLastFrame(voiceEnded: Promise<void>, signal: AbortSignal, draw: () 
 }
 
 // 動画を実際に再生しながら Canvas を録画するので、書き出しには動画と同じ時間がかかる。
-export async function exportVideo({ doc, src, signal, onProgress }: ExportOptions) {
+export async function exportVideo({ doc, glossary, src, signal, onProgress }: ExportOptions) {
   const canvas = document.createElement("canvas");
   canvas.width = OUTPUT_WIDTH;
   canvas.height = OUTPUT_HEIGHT;
@@ -79,7 +80,7 @@ export async function exportVideo({ doc, src, signal, onProgress }: ExportOption
   const audioContext = new AudioContext();
   await resumeAudio(audioContext);
   const audioOutput = audioContext.createMediaStreamDestination();
-  const narration = await prepareNarration(doc, audioContext, signal);
+  const narration = await prepareNarration(doc, audioContext, glossary, signal);
   // 接続しないと動画の音がスピーカーへ出るので、消すときは音量 0 を通す。
   const originalGain = audioContext.createGain();
   originalGain.gain.value = doc.narration.enabled && !doc.narration.keepOriginalAudio ? 0 : 1;

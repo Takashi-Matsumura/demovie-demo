@@ -212,7 +212,7 @@ export function Inspector({
               onChange={(event) => onGlossary(event.target.value)}
             />
             <p className="text-xs text-ink-2">
-              1 行に 1 語。読みが表記と離れている語は「表記 = 読み」と書きます。AI が聞き間違いを直すときと、手順の説明文を作るときに使います。
+              1 行に 1 語。読みが表記と離れている語は「表記 = 読み」と書きます。AI が聞き間違いを直すとき、手順の説明文を作るとき、ナレーションで読むときに使います。
             </p>
           </>
         )}

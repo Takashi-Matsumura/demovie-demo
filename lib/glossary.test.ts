@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatGlossary, parseGlossary } from "./glossary";
+import { applyReadings, formatGlossary, parseGlossary } from "./glossary";
 
 describe("parseGlossary", () => {
   it("reads terms and optional readings", () => {
@@ -27,5 +27,20 @@ describe("formatGlossary", () => {
       "楽楽精算\nDemovie（読み: デモービー）",
     );
     expect(formatGlossary("")).toBe("");
+  });
+});
+
+describe("applyReadings", () => {
+  it("replaces registered terms with their readings", () => {
+    expect(applyReadings("Demovieで録画します", "Demovie=デモービー")).toBe("デモービーで録画します");
+  });
+
+  it("leaves terms without a reading alone", () => {
+    expect(applyReadings("楽楽精算を開きます", "楽楽精算")).toBe("楽楽精算を開きます");
+  });
+
+  it("prefers the longer of overlapping terms", () => {
+    const glossary = "freee = フリー\n会計freee = かいけいフリー";
+    expect(applyReadings("会計freeeとfreee", glossary)).toBe("かいけいフリーとフリー");
   });
 });
