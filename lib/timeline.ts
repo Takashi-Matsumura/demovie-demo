@@ -1,4 +1,4 @@
-import { newId, type Caption, type Clip, type DemoDocument, type Zoom } from "./document";
+import { newId, type Blur, type Caption, type Clip, type DemoDocument, type Zoom } from "./document";
 
 // タイムライン時刻と素材時刻の変換はこのファイルだけが行う。
 // クリップは常に隙間なく連続するので、タイムライン時刻はクリップ長の累積で決まる。
@@ -341,6 +341,43 @@ export function updateCaption(doc: DemoDocument, captionId: string, text: string
 
 export function removeCaption(doc: DemoDocument, captionId: string): DemoDocument {
   return { ...doc, captions: doc.captions.filter((caption) => caption.id !== captionId) };
+}
+
+export type BlurRect = Pick<Blur, "x" | "y" | "width" | "height">;
+
+// 隠し忘れを防ぐため、新しいぼかしは動画全体にかける。
+export function addBlur(doc: DemoDocument, rect: BlurRect): DemoDocument {
+  const blur: Blur = {
+    id: newId(),
+    sourceStartSec: 0,
+    sourceEndSec: doc.asset.durationSec,
+    ...rect,
+  };
+  return { ...doc, blurs: [...doc.blurs, blur] };
+}
+
+export function setBlurRange(
+  doc: DemoDocument,
+  blurId: string,
+  sourceStartSec: number,
+  sourceEndSec: number,
+): DemoDocument {
+  return {
+    ...doc,
+    blurs: doc.blurs.map((item) =>
+      item.id === blurId ? { ...item, sourceStartSec, sourceEndSec } : item,
+    ),
+  };
+}
+
+export function removeBlur(doc: DemoDocument, blurId: string): DemoDocument {
+  return { ...doc, blurs: doc.blurs.filter((item) => item.id !== blurId) };
+}
+
+export function blursAt(doc: DemoDocument, sourceSec: number) {
+  return doc.blurs.filter(
+    (item) => sourceSec >= item.sourceStartSec && sourceSec < item.sourceEndSec,
+  );
 }
 
 export function captionTextAt(doc: DemoDocument, clipId: string, sourceSec: number) {

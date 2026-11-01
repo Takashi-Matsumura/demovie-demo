@@ -19,6 +19,8 @@ type InspectorProps = {
   caption: CaptionPanel | null;
   glossary: string;
   onGlossary: (text: string) => void;
+  onBlurScope: (blurId: string, scope: "all" | "step") => void;
+  onBlurRemove: (blurId: string) => void;
   onLook: (patch: Partial<Look>) => void;
   onZoom: (patch: Partial<Pick<Zoom, "depth" | "focusX" | "focusY">>) => void;
   onZoomLength: (lengthSec: number) => void;
@@ -66,6 +68,8 @@ export function Inspector({
   caption,
   glossary,
   onGlossary,
+  onBlurScope,
+  onBlurRemove,
   onLook,
   onZoom,
   onZoomLength,
@@ -183,6 +187,41 @@ export function Inspector({
           </>
         )}
       </section>
+
+      {doc.blurs.length > 0 && (
+        <section className="flex flex-col gap-2">
+          <h2 className="text-sm font-semibold">ぼかし（{doc.blurs.length}）</h2>
+          <ul className="flex flex-col gap-1">
+            {doc.blurs.map((blur, index) => (
+              <li key={blur.id} className="flex items-center gap-2 text-sm">
+                <select
+                  aria-label={`ぼかし ${index + 1} の範囲`}
+                  className="min-w-0 flex-1 rounded bg-paper-3 p-1 text-sm"
+                  value={
+                    blur.sourceEndSec - blur.sourceStartSec >= doc.asset.durationSec
+                      ? "all"
+                      : "step"
+                  }
+                  onChange={(event) =>
+                    onBlurScope(blur.id, event.target.value === "all" ? "all" : "step")
+                  }
+                >
+                  <option value="all">動画全体</option>
+                  <option value="step">今の手順だけ</option>
+                </select>
+                <button
+                  type="button"
+                  aria-label={`ぼかし ${index + 1} を削除`}
+                  className="rounded px-2 py-1 text-danger hover:bg-paper-3"
+                  onClick={() => onBlurRemove(blur.id)}
+                >
+                  削除
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       {zoom && (
         <section className="flex flex-col gap-3">
