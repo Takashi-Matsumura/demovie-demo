@@ -45,6 +45,7 @@ import {
 import { Assistant } from "./Assistant";
 import { Inspector } from "./Inspector";
 import { Steps } from "./Steps";
+import { useGlossary } from "./useGlossary";
 import { Timeline } from "./Timeline";
 import { useDocument } from "./useDocument";
 import { usePlayer } from "./usePlayer";
@@ -319,6 +320,7 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
   const [exportState, setExportState] = useState<ExportState>({ status: "idle" });
   const [captionState, setCaptionState] = useState<CaptionState>({ status: "idle" });
   const [timelineOpen, setTimelineOpen] = useState(false);
+  const [glossary, setGlossary] = useGlossary();
   const [saveFailed, setSaveFailed] = useState(false);
 
   // 編集対象のズームとキャプションは選択状態を持たず、再生位置から決める。
@@ -395,6 +397,7 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
     try {
       const { captions, zooms } = await generateCaptions({
         doc,
+        glossary,
         src: source.url,
         signal: controller.signal,
         onProgress: (message) => setCaptionState({ status: "running", message }),
@@ -519,6 +522,7 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
           <Assistant
             doc={doc}
             timeSec={timeSec}
+            glossary={glossary}
             disabled={exporting || generating}
             onListen={() => {
               if (playing) void toggle();
@@ -571,6 +575,8 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
           doc={doc}
           zoom={zoom}
           caption={captionSpan && bounds && { ...captionSpan, ...bounds }}
+          glossary={glossary}
+          onGlossary={setGlossary}
           onLook={(patch) => edit((current) => ({ ...current, look: { ...current.look, ...patch } }))}
           onZoom={(patch) => {
             if (zoom) edit((current) => updateZoom(current, zoom.id, patch));

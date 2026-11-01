@@ -65,6 +65,11 @@ describe("buildPrompt", () => {
     expect(buildPrompt("  経費精算の手順  ").startsWith("この動画の目的: 経費精算の手順\n")).toBe(true);
     expect(buildPrompt("  ")).not.toContain("この動画の目的");
   });
+
+  it("adds the glossary only when it is given", () => {
+    expect(buildPrompt("", "楽楽精算")).toContain("この表記で書く:\n楽楽精算");
+    expect(buildPrompt("", "  ")).not.toContain("この表記で書く");
+  });
 });
 
 describe("changedRegion", () => {

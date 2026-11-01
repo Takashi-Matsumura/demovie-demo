@@ -1,4 +1,5 @@
 import { newId, type Caption, type Clip, type DemoDocument, type Zoom } from "./document";
+import { formatGlossary } from "./glossary";
 import { seekTo, waitForEvent } from "./media";
 
 // 手元の llama-server を直接呼ぶ。動画のフレームはこの PC の外へは出ない。
@@ -31,9 +32,12 @@ const PROMPT = `操作の後の画面で新しく表示された内容を重視�
 ・画面に実際に見える文字を根拠にし、推測で固有名詞を足さない
 ・説明文だけを出力する`;
 
-export function buildPrompt(purpose: string) {
+export function buildPrompt(purpose: string, glossary = "") {
   const context = purpose.trim();
-  return context ? `この動画の目的: ${context}\n${PROMPT}` : PROMPT;
+  const terms = formatGlossary(glossary);
+  const heading = context ? `この動画の目的: ${context}\n` : "";
+  const glossarySection = terms ? `\n画面に出てくる用語は、この表記で書く:\n${terms}` : "";
+  return `${heading}${PROMPT}${glossarySection}`;
 }
 
 export type Sample = { sec: number; ratio: number };
@@ -178,13 +182,20 @@ async function describe(before: string, after: string, prompt: string, signal: A
 
 type GenerateOptions = {
   doc: DemoDocument;
+  glossary: string;
   src: string;
   signal: AbortSignal;
   onProgress: (message: string) => void;
 };
 
 // 変化のあった箇所だけ VLM に渡す。全区間を送ると 1 枚ごとに数秒かかり、静止画面の説明も増える。
-export async function generateCaptions({ doc, src, signal, onProgress }: GenerateOptions) {
+export async function generateCaptions({
+  doc,
+  glossary,
+  src,
+  signal,
+  onProgress,
+}: GenerateOptions) {
   const canvas = document.createElement("canvas");
   canvas.width = SIGNATURE_WIDTH;
   canvas.height = SIGNATURE_HEIGHT;
@@ -231,7 +242,7 @@ export async function generateCaptions({ doc, src, signal, onProgress }: Generat
       const settled = operation.afterSec + SETTLE_SEC;
       await seekTo(video, Math.min(settled, clip.sourceEndSec - END_MARGIN_SEC));
       const region = changedRegion(beforeSignature, signatureOf(ctx, video), SIGNATURE_WIDTH);
-      const text = await describe(before, frameUrl(video), buildPrompt(doc.purpose), signal);
+      const text = await describe(before, frameUrl(video), buildPrompt(doc.purpose, glossary), signal);
       const sourceStartSec = Math.max(operation.beforeSec, clip.sourceStartSec);
       if (!text || endSec <= sourceStartSec) continue;
       captions.push({ id: newId(), clipId: clip.id, sourceStartSec, sourceEndSec: endSec, text });

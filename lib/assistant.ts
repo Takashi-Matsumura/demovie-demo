@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { commandListSchema, describeState, type Command } from "./commands";
 import type { DemoDocument } from "./document";
+import { formatGlossary } from "./glossary";
 
 // 手元の llama-server を直接呼ぶ。指示の内容はこの PC の外へは出ない。
 const LLM_URL = process.env.NEXT_PUBLIC_LLM_URL ?? "http://127.0.0.1:8080";
@@ -27,8 +28,16 @@ set_background(background): 背景を変更。dusk=夕闇 ember=残り火 slate=
 undo: 直前の操作を元に戻す
 clarify(question): 聞き返す`;
 
+// 音声認識の聞き間違いは文脈で直せるので、用語は聞き取りのあとの工程で使う。
+function glossaryRule(glossary: string) {
+  const terms = formatGlossary(glossary);
+  if (!terms) return "";
+  return `\n音声認識の聞き間違いで、下の用語と読みが同じか近い語は、用語の表記に直して扱う。それ以外の語は変えない。\n用語:\n${terms}`;
+}
+
 type InterpretOptions = {
   transcript: string;
+  glossary: string;
   doc: DemoDocument;
   timeSec: number;
   previousQuestion: string | null;
@@ -37,6 +46,7 @@ type InterpretOptions = {
 
 export async function interpret({
   transcript,
+  glossary,
   doc,
   timeSec,
   previousQuestion,
@@ -51,7 +61,7 @@ export async function interpret({
       signal,
       body: JSON.stringify({
         messages: [
-          { role: "system", content: SYSTEM_PROMPT },
+          { role: "system", content: SYSTEM_PROMPT + glossaryRule(glossary) },
           {
             role: "user",
             content: `現在の状態: ${JSON.stringify(describeState(doc, timeSec))}\n${context}指示: ${transcript}`,
@@ -98,7 +108,7 @@ export function acceptTidied(spoken: string, tidied: string) {
 }
 
 // 整えられないときは話した言葉のまま使う。言葉そのものは聞き取れているので失わない。
-export async function tidyNarration(spoken: string, signal: AbortSignal) {
+export async function tidyNarration(spoken: string, glossary: string, signal: AbortSignal) {
   try {
     const response = await fetch(`${LLM_URL}/v1/chat/completions`, {
       method: "POST",
@@ -106,7 +116,7 @@ export async function tidyNarration(spoken: string, signal: AbortSignal) {
       signal,
       body: JSON.stringify({
         messages: [
-          { role: "system", content: TIDY_PROMPT },
+          { role: "system", content: TIDY_PROMPT + glossaryRule(glossary) },
           { role: "user", content: spoken },
         ],
         temperature: 0.1,
