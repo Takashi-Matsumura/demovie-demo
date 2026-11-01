@@ -6,6 +6,7 @@ import { clipSpans, totalDuration } from "./timeline";
 
 const FPS = 30;
 const LAST_FRAME_MARGIN_SEC = 0.01;
+const FRAME_SEC = 1 / FPS;
 
 type ExportOptions = {
   doc: DemoDocument;
@@ -99,8 +100,10 @@ export async function exportVideo({ doc, src, signal, onProgress }: ExportOption
     for (const span of clipSpans(doc)) {
       const { clip } = span;
       if (recorder.state === "recording") recorder.pause();
-      await seekTo(video, clip.sourceStartSec);
-      drawFrame(ctx, video, doc, clip.id, clip.sourceStartSec);
+      // 開始時刻ちょうどだと直前のコマ、つまり削除した区間の最後が映ることがある。
+      const firstSec = clip.sourceStartSec + FRAME_SEC;
+      await seekTo(video, firstSec);
+      drawFrame(ctx, video, doc, clip.id, firstSec);
       if (recorder.state === "inactive") recorder.start(250);
       else recorder.resume();
 
@@ -112,20 +115,25 @@ export async function exportVideo({ doc, src, signal, onProgress }: ExportOption
             reject(new DOMException("書き出しを中止しました。", "AbortError"));
             return;
           }
-          const sourceSec = Math.min(video.currentTime, clip.sourceEndSec);
+          // 終わりを過ぎたコマは削除した区間かもしれないので、描く前に止める。
+          if (video.ended || video.currentTime >= clip.sourceEndSec) {
+            resolve();
+            return;
+          }
+          const sourceSec = video.currentTime;
           drawFrame(ctx, video, doc, clip.id, sourceSec);
           onProgress((span.startSec + sourceSec - clip.sourceStartSec) / total);
-          if (video.ended || video.currentTime >= clip.sourceEndSec) resolve();
-          else requestAnimationFrame(tick);
+          requestAnimationFrame(tick);
         };
         tick();
       });
       video.pause();
 
       if (narration.has(clip.id)) {
-        await holdLastFrame(voiceEnded, signal, () =>
-          drawFrame(ctx, video, doc, clip.id, clip.sourceEndSec - LAST_FRAME_MARGIN_SEC),
-        );
+        // 止まった位置は手順の外なので、手順の中へ戻してから待つ。
+        const lastSec = clip.sourceEndSec - LAST_FRAME_MARGIN_SEC;
+        await seekTo(video, lastSec);
+        await holdLastFrame(voiceEnded, signal, () => drawFrame(ctx, video, doc, clip.id, lastSec));
       }
     }
     recorder.stop();
