@@ -57,6 +57,7 @@ import { Inspector } from "./Inspector";
 import { ServiceStatusBar } from "./ServiceStatus";
 import { Steps } from "./Steps";
 import { useGlossary } from "./useGlossary";
+import { useSpeech } from "./useSpeech";
 import { useThumbnails } from "./useThumbnails";
 import { Timeline } from "./Timeline";
 import { useDocument } from "./useDocument";
@@ -348,6 +349,7 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
   const [dragBox, setDragBox] = useState<DragBox | null>(null);
   const [glossary, setGlossary] = useGlossary();
   const thumbnailOf = useThumbnails(doc, source.url);
+  const { speak, error: speechError } = useSpeech();
   const [saveFailed, setSaveFailed] = useState(false);
 
   // 編集対象のズームとキャプションは選択状態を持たず、再生位置から決める。
@@ -506,6 +508,11 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
       <ServiceStatusBar />
       <ExportStatus state={exportState} />
       <CaptionStatus state={captionState} />
+      {speechError && (
+        <p role="alert" className="text-sm text-danger">
+          {speechError}
+        </p>
+      )}
 
       <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[20rem_minmax(0,1fr)] xl:grid-cols-[20rem_minmax(0,1fr)_16rem]">
         <Steps
@@ -515,6 +522,7 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
           onPurpose={(purpose) => edit((current) => ({ ...current, purpose }))}
           onSelect={seek}
           onText={(clipId, text) => edit((current) => setStepText(current, clipId, text))}
+          onSpeak={(text) => void speak(doc, text)}
           onMove={(clipId, delta) => edit((current) => moveClip(current, clipId, delta))}
           onDelete={(clipId) => edit((current) => deleteClip(current, clipId))}
         />
@@ -685,6 +693,9 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
           caption={captionSpan && bounds && { ...captionSpan, ...bounds }}
           glossary={glossary}
           onGlossary={setGlossary}
+          onNarration={(patch) =>
+            edit((current) => ({ ...current, narration: { ...current.narration, ...patch } }))
+          }
           onBlurScope={(blurId, scope) => {
             const { sourceStartSec, sourceEndSec } = currentClip;
             edit((current) =>

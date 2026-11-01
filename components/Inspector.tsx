@@ -1,8 +1,16 @@
 "use client";
 
-import { useState } from "react";
-import { BACKGROUND_IDS, type Caption, type DemoDocument, type Look, type Zoom } from "@/lib/document";
+import { useEffect, useState } from "react";
+import {
+  BACKGROUND_IDS,
+  type Caption,
+  type DemoDocument,
+  type Look,
+  type Narration,
+  type Zoom,
+} from "@/lib/document";
 import { parseGlossary } from "@/lib/glossary";
+import { listVoices, type Voice } from "@/lib/narration";
 import { BACKGROUNDS } from "@/lib/render";
 
 type CaptionPanel = {
@@ -19,6 +27,7 @@ type InspectorProps = {
   caption: CaptionPanel | null;
   glossary: string;
   onGlossary: (text: string) => void;
+  onNarration: (patch: Partial<Narration>) => void;
   onBlurScope: (blurId: string, scope: "all" | "step") => void;
   onBlurRemove: (blurId: string) => void;
   onLook: (patch: Partial<Look>) => void;
@@ -68,6 +77,7 @@ export function Inspector({
   caption,
   glossary,
   onGlossary,
+  onNarration,
   onBlurScope,
   onBlurRemove,
   onLook,
@@ -81,6 +91,23 @@ export function Inspector({
   const { look } = doc;
   const [lookOpen, setLookOpen] = useState(true);
   const [glossaryOpen, setGlossaryOpen] = useState(false);
+  const [voices, setVoices] = useState<Voice[]>([]);
+  const [voiceError, setVoiceError] = useState(false);
+  const { narration } = doc;
+
+  useEffect(() => {
+    if (!narration.enabled) return;
+    const controller = new AbortController();
+    listVoices(controller.signal)
+      .then((items) => {
+        setVoices(items);
+        setVoiceError(false);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setVoiceError(true);
+      });
+    return () => controller.abort();
+  }, [narration.enabled]);
 
   return (
     <aside className="flex flex-col gap-6 rounded-lg bg-paper-2 p-4">
@@ -183,6 +210,68 @@ export function Inspector({
             />
             <p className="text-xs text-ink-2">
               1 行に 1 語。読みが表記と離れている語は「表記 = 読み」と書きます。AI が聞き間違いを直すときと、手順の説明文を作るときに使います。
+            </p>
+          </>
+        )}
+      </section>
+
+      <section className="flex flex-col gap-3">
+        <label className="flex items-center justify-between text-sm font-semibold">
+          ナレーション
+          <input
+            type="checkbox"
+            className="size-4 accent-accent"
+            checked={narration.enabled}
+            onChange={(event) => onNarration({ enabled: event.target.checked })}
+          />
+        </label>
+        {narration.enabled && (
+          <>
+            {voiceError && (
+              <p role="alert" className="text-xs text-danger">
+                読み上げサーバに接続できません。
+              </p>
+            )}
+            <label className="flex flex-col gap-1.5 text-sm text-ink-2">
+              声
+              <select
+                className="rounded bg-paper-3 p-1 text-sm"
+                value={narration.voiceId}
+                onChange={(event) => {
+                  const voice = voices.find((item) => item.id === Number(event.target.value));
+                  if (voice) onNarration({ voiceId: voice.id, voiceName: voice.name });
+                }}
+              >
+                {voices.length === 0 && (
+                  <option value={narration.voiceId}>{narration.voiceName}</option>
+                )}
+                {voices.map((voice) => (
+                  <option key={voice.id} value={voice.id}>
+                    {voice.name}（{voice.style}）
+                  </option>
+                ))}
+              </select>
+            </label>
+            <Slider
+              label="速さ"
+              value={narration.speed}
+              min={0.7}
+              max={1.5}
+              step={0.1}
+              unit="倍"
+              onChange={(speed) => onNarration({ speed })}
+            />
+            <label className="flex items-center justify-between text-sm text-ink-2">
+              元の音声を残す
+              <input
+                type="checkbox"
+                className="size-4 accent-accent"
+                checked={narration.keepOriginalAudio}
+                onChange={(event) => onNarration({ keepOriginalAudio: event.target.checked })}
+              />
+            </label>
+            <p className="text-xs text-ink-2">
+              動画に「VOICEVOX:{narration.voiceName}」と表示します。声の利用規約を確認してください。
             </p>
           </>
         )}

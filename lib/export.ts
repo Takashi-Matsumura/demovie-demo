@@ -1,9 +1,12 @@
 import type { DemoDocument } from "./document";
 import { pickMimeType, seekTo, waitForEvent } from "./media";
+import { prepareNarration } from "./narration";
 import { drawFrame, OUTPUT_HEIGHT, OUTPUT_WIDTH } from "./render";
 import { clipSpans, totalDuration } from "./timeline";
 
 const FPS = 30;
+const LAST_FRAME_MARGIN_SEC = 0.01;
+const FRAME_SEC = 1 / FPS;
 
 type ExportOptions = {
   doc: DemoDocument;
@@ -18,6 +21,45 @@ async function resumeAudio(audioContext: AudioContext) {
     setTimeout(() => reject(new Error("音声を開始できませんでした。もう一度お試しください。")), 3000);
   });
   await Promise.race([audioContext.resume(), timeout]);
+}
+
+function playVoice(
+  context: AudioContext,
+  buffer: AudioBuffer | undefined,
+  output: AudioNode,
+) {
+  return new Promise<void>((resolve) => {
+    if (!buffer) {
+      resolve();
+      return;
+    }
+    const source = context.createBufferSource();
+    source.buffer = buffer;
+    source.connect(output);
+    source.addEventListener("ended", () => resolve());
+    source.start();
+  });
+}
+
+// 読み上げが手順より長いときは切らず、最後の画面のまま読み終わるのを待つ。
+function holdLastFrame(voiceEnded: Promise<void>, signal: AbortSignal, draw: () => void) {
+  let speaking = true;
+  void voiceEnded.then(() => {
+    speaking = false;
+  });
+  return new Promise<void>((resolve, reject) => {
+    const hold = () => {
+      if (signal.aborted) {
+        reject(new DOMException("書き出しを中止しました。", "AbortError"));
+      } else if (speaking) {
+        draw();
+        requestAnimationFrame(hold);
+      } else {
+        resolve();
+      }
+    };
+    hold();
+  });
 }
 
 // 動画を実際に再生しながら Canvas を録画するので、書き出しには動画と同じ時間がかかる。
@@ -37,7 +79,11 @@ export async function exportVideo({ doc, src, signal, onProgress }: ExportOption
   const audioContext = new AudioContext();
   await resumeAudio(audioContext);
   const audioOutput = audioContext.createMediaStreamDestination();
-  audioContext.createMediaElementSource(video).connect(audioOutput);
+  const narration = await prepareNarration(doc, audioContext, signal);
+  // 接続しないと動画の音がスピーカーへ出るので、消すときは音量 0 を通す。
+  const originalGain = audioContext.createGain();
+  originalGain.gain.value = doc.narration.enabled && !doc.narration.keepOriginalAudio ? 0 : 1;
+  audioContext.createMediaElementSource(video).connect(originalGain).connect(audioOutput);
 
   const stream = new MediaStream([
     ...canvas.captureStream(FPS).getVideoTracks(),
@@ -54,27 +100,41 @@ export async function exportVideo({ doc, src, signal, onProgress }: ExportOption
     for (const span of clipSpans(doc)) {
       const { clip } = span;
       if (recorder.state === "recording") recorder.pause();
-      await seekTo(video, clip.sourceStartSec);
-      drawFrame(ctx, video, doc, clip.id, clip.sourceStartSec);
+      // 開始時刻ちょうどだと直前のコマ、つまり削除した区間の最後が映ることがある。
+      const firstSec = clip.sourceStartSec + FRAME_SEC;
+      await seekTo(video, firstSec);
+      drawFrame(ctx, video, doc, clip.id, firstSec);
       if (recorder.state === "inactive") recorder.start(250);
       else recorder.resume();
 
       await video.play();
+      const voiceEnded = playVoice(audioContext, narration.get(clip.id), audioOutput);
       await new Promise<void>((resolve, reject) => {
         const tick = () => {
           if (signal.aborted) {
             reject(new DOMException("書き出しを中止しました。", "AbortError"));
             return;
           }
-          const sourceSec = Math.min(video.currentTime, clip.sourceEndSec);
+          // 終わりを過ぎたコマは削除した区間かもしれないので、描く前に止める。
+          if (video.ended || video.currentTime >= clip.sourceEndSec) {
+            resolve();
+            return;
+          }
+          const sourceSec = video.currentTime;
           drawFrame(ctx, video, doc, clip.id, sourceSec);
           onProgress((span.startSec + sourceSec - clip.sourceStartSec) / total);
-          if (video.ended || video.currentTime >= clip.sourceEndSec) resolve();
-          else requestAnimationFrame(tick);
+          requestAnimationFrame(tick);
         };
         tick();
       });
       video.pause();
+
+      if (narration.has(clip.id)) {
+        // 止まった位置は手順の外なので、手順の中へ戻してから待つ。
+        const lastSec = clip.sourceEndSec - LAST_FRAME_MARGIN_SEC;
+        await seekTo(video, lastSec);
+        await holdLastFrame(voiceEnded, signal, () => drawFrame(ctx, video, doc, clip.id, lastSec));
+      }
     }
     recorder.stop();
     await stopped;

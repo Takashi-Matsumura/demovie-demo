@@ -16,6 +16,7 @@ const up = {
   ":8080/health": { status: "ok" },
   ":8090/health": { status: "ok" },
   "/api/intent": { configured: true },
+  "/version": "0.25.2",
 };
 
 const states = async () =>
@@ -32,7 +33,13 @@ describe("canReadImages", () => {
 describe("checkServices", () => {
   it("reports every service as ready", async () => {
     stub(up);
-    expect(await states()).toEqual({ vision: "ok", llm: "ok", whisper: "ok", intent: "ok" });
+    expect(await states()).toEqual({
+      vision: "ok",
+      llm: "ok",
+      whisper: "ok",
+      intent: "ok",
+      voice: "ok",
+    });
   });
 
   it("reports only the one that stopped", async () => {
@@ -44,6 +51,11 @@ describe("checkServices", () => {
   it("treats a text-only model as down for screen analysis", async () => {
     stub({ ...up, "/props": { modalities: { vision: false } } });
     expect((await states()).vision).toBe("down");
+  });
+
+  it("does not warn when the optional voice server is stopped", async () => {
+    stub({ ...up, "/version": null });
+    expect((await states()).voice).toBe("off");
   });
 
   it("treats a missing Jev key as off, not as a failure", async () => {
