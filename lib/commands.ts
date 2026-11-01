@@ -11,6 +11,7 @@ import {
   splitAt,
   stepSpans,
   updateZoom,
+  zoomAt,
   zoomSpans,
 } from "./timeline";
 
@@ -23,6 +24,7 @@ const commandSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("move_step"), step, to: step }),
   z.object({ type: z.literal("split_here") }),
   z.object({ type: z.literal("add_zoom") }),
+  z.object({ type: z.literal("zoom_to"), target: z.string().min(1) }),
   z.object({ type: z.literal("remove_zoom"), step }),
   z.object({ type: z.literal("set_zoom_depth"), step, depth: z.number() }),
   z.object({ type: z.literal("seek_step"), step }),
@@ -35,12 +37,18 @@ export const commandListSchema = z.object({ commands: z.array(commandSchema) });
 
 export type Command = z.infer<typeof commandSchema>;
 
+// zoom_to を画面の解析で解決した後の形。AI の返答には含まれない。
+export type ZoomFocus = { type: "zoom_focus"; target: string; focusX: number; focusY: number };
+
+export type ResolvedCommand = Exclude<Command, { type: "zoom_to" }> | ZoomFocus;
+
 export type CommandResult =
   | { kind: "applied"; doc: DemoDocument; message: string; seekSec?: number }
   | { kind: "undo" }
   | { kind: "question"; question: string }
   | { kind: "failed"; message: string };
 
+const FOCUS_DEPTH = 2;
 const MIN_DEPTH = 1.1;
 const MAX_DEPTH = 4;
 
@@ -71,7 +79,7 @@ function zoomOfClip(doc: DemoDocument, clipId: string, stepNumber: number) {
 // 途中で失敗したら何も適用しない。手順番号は指示を出した時点の番号として解決する。
 export function applyCommands(
   doc: DemoDocument,
-  commands: Command[],
+  commands: (Command | ZoomFocus)[],
   timeSec: number,
   clipIds: string[] = doc.clips.map((clip) => clip.id),
 ): CommandResult {
@@ -132,6 +140,21 @@ export function applyCommands(
           if (!added) throw new CommandError("この位置にはズームを追加できません。");
           next = added.doc;
           done.push("ここにズームを追加しました。");
+          break;
+        }
+        case "zoom_to":
+          throw new CommandError(`「${command.target}」の位置を確認できませんでした。`);
+        case "zoom_focus": {
+          const focus = { focusX: command.focusX, focusY: command.focusY };
+          const existing = zoomAt(next, timeSec)?.zoom;
+          if (existing) {
+            next = updateZoom(next, existing.id, focus);
+          } else {
+            const added = addZoom(next, timeSec);
+            if (!added) throw new CommandError("この位置にはズームを追加できません。");
+            next = updateZoom(added.doc, added.zoomId, { ...focus, depth: FOCUS_DEPTH });
+          }
+          done.push(`「${command.target}」にズームしました。`);
           break;
         }
         case "remove_zoom":

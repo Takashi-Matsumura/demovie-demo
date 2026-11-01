@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { applyCommands, commandListSchema, describeState, type Command } from "./commands";
+import {
+  applyCommands,
+  commandListSchema,
+  describeState,
+  type Command,
+  type ZoomFocus,
+} from "./commands";
 import { createDocument, type DemoDocument } from "./document";
 import { addZoom, setStepText, splitAt, stepSpans, totalDuration } from "./timeline";
 
@@ -8,7 +14,7 @@ function threeSteps(): DemoDocument {
   return splitAt(splitAt(doc, 3), 6);
 }
 
-function applied(doc: DemoDocument, commands: Command[], timeSec = 0) {
+function applied(doc: DemoDocument, commands: (Command | ZoomFocus)[], timeSec = 0) {
   const result = applyCommands(doc, commands, timeSec);
   if (result.kind !== "applied") throw new Error(`not applied: ${JSON.stringify(result)}`);
   return result;
@@ -41,6 +47,33 @@ describe("applyCommands", () => {
   it("uses the playhead for split and zoom", () => {
     expect(applied(threeSteps(), [{ type: "split_here" }], 1).doc.clips).toHaveLength(4);
     expect(applied(threeSteps(), [{ type: "add_zoom" }], 1).doc.zooms[0].sourceStartSec).toBe(1);
+  });
+
+  it("zooms to a located element", () => {
+    const { doc, message } = applied(
+      threeSteps(),
+      [{ type: "zoom_focus", target: "保存ボタン", focusX: 0.8, focusY: 0.9 }],
+      1,
+    );
+    expect(doc.zooms[0]).toMatchObject({ focusX: 0.8, focusY: 0.9, depth: 2 });
+    expect(message).toBe("「保存ボタン」にズームしました。");
+  });
+
+  it("moves an existing zoom instead of adding another", () => {
+    const result = addZoom(threeSteps(), 1);
+    if (!result) throw new Error("zoom was not added");
+    const { doc } = applied(
+      result.doc,
+      [{ type: "zoom_focus", target: "検索欄", focusX: 0.1, focusY: 0.2 }],
+      1.5,
+    );
+    expect(doc.zooms).toHaveLength(1);
+    expect(doc.zooms[0]).toMatchObject({ focusX: 0.1, focusY: 0.2, depth: 1.8 });
+  });
+
+  it("does not apply an element that was never located", () => {
+    const result = applyCommands(threeSteps(), [{ type: "zoom_to", target: "保存ボタン" }], 1);
+    expect(result.kind).toBe("failed");
   });
 
   it("clamps the zoom depth", () => {

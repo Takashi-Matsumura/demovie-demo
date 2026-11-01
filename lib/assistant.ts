@@ -21,6 +21,7 @@ delete_step(step): 手順を映像ごと削除
 move_step(step, to): 手順を移動
 split_here: 再生位置で手順を分ける
 add_zoom: 再生位置にズームを追加
+zoom_to(target): 画面の部品にズーム。「保存ボタンにズームして」のように部品を名指ししたときに使い、target は部品の名前。座標は書かない
 remove_zoom(step): ズームを削除
 set_zoom_depth(step, depth): ズームの倍率を変更
 seek_step(step): 手順へ移動
