@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { createDocument, documentSchema, newId, type DemoDocument } from "./document";
+import { mosaicGrid } from "./render";
 import {
+  addBlur,
   addCaption,
   addZoom,
   applySteps,
+  blursAt,
   cameraAt,
   captionAt,
   captionBounds,
@@ -12,6 +15,8 @@ import {
   deleteClip,
   locate,
   moveClip,
+  removeBlur,
+  setBlurRange,
   setCaptionRange,
   setStepText,
   setZoomLength,
@@ -271,6 +276,55 @@ describe("steps", () => {
     const deleted = deleteClip(named, split.clips[1].id);
     expect(deleted.captions).toEqual([]);
     expect(totalDuration(deleted)).toBe(4);
+  });
+});
+
+describe("blurs", () => {
+  const rect = { x: 0.1, y: 0.1, width: 0.2, height: 0.1 };
+
+  it("covers the whole video by default", () => {
+    const doc = addBlur(makeDoc(), rect);
+    expect(blursAt(doc, 0)).toHaveLength(1);
+    expect(blursAt(doc, 9.9)).toHaveLength(1);
+    expect(documentSchema.safeParse(doc).success).toBe(true);
+  });
+
+  it("stays on the same footage through splits, moves and deletes", () => {
+    const doc = addBlur(splitAt(makeDoc(), 4), rect);
+    const moved = moveClip(doc, doc.clips[1].id, -1);
+    const deleted = deleteClip(splitAt(moved, 2), moved.clips[0].id);
+    expect(deleted.blurs).toEqual(doc.blurs);
+    expect(blursAt(deleted, 7)).toHaveLength(1);
+  });
+
+  it("can be narrowed and removed", () => {
+    const doc = addBlur(makeDoc(), rect);
+    const { id } = doc.blurs[0];
+    const narrowed = setBlurRange(doc, id, 2, 4);
+    expect(blursAt(narrowed, 1)).toEqual([]);
+    expect(blursAt(narrowed, 2)).toHaveLength(1);
+    expect(blursAt(narrowed, 4.1)).toEqual([]);
+    expect(removeBlur(doc, id).blurs).toEqual([]);
+  });
+
+  it("covers the frames at both ends of its range", () => {
+    const doc = addBlur(makeDoc(), rect);
+    const { id } = doc.blurs[0];
+    expect(blursAt(doc, doc.asset.durationSec)).toHaveLength(1);
+    const narrowed = setBlurRange(doc, id, 2, 4);
+    expect(blursAt(narrowed, 4)).toHaveLength(1);
+    expect(blursAt(narrowed, 1.98)).toHaveLength(1);
+  });
+
+  it("sizes mosaic blocks by the recording, not the zoomed output", () => {
+    expect(mosaicGrid(380, 100, 1920)).toEqual({ columns: 10, rows: 3 });
+    expect(mosaicGrid(5, 5, 1920)).toEqual({ columns: 1, rows: 1 });
+  });
+
+  it("opens work saved before blurs existed", () => {
+    const saved: Record<string, unknown> = { ...makeDoc() };
+    delete saved.blurs;
+    expect(documentSchema.parse(saved).blurs).toEqual([]);
   });
 });
 

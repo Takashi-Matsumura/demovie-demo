@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type ChangeEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type PointerEvent,
+} from "react";
 import { generateCaptions } from "@/lib/captions";
 import { createDocument, newId, type DemoDocument } from "@/lib/document";
 import { exportVideo } from "@/lib/export";
@@ -19,8 +26,9 @@ import {
   saveProject,
   type ProjectSummary,
 } from "@/lib/projects";
-import { OUTPUT_HEIGHT, OUTPUT_WIDTH } from "@/lib/render";
+import { OUTPUT_HEIGHT, OUTPUT_WIDTH, previewToVideo } from "@/lib/render";
 import {
+  addBlur,
   addCaption,
   addZoom,
   applySteps,
@@ -30,8 +38,10 @@ import {
   deleteClip,
   locate,
   moveClip,
+  removeBlur,
   removeCaption,
   removeZoom,
+  setBlurRange,
   setCaptionRange,
   setStepText,
   setZoomLength,
@@ -295,6 +305,17 @@ type ExportState =
   | { status: "done"; url: string; fileName: string }
   | { status: "failed"; message: string };
 
+type DragBox = {
+  canvasX: number;
+  canvasY: number;
+  startLeft: number;
+  startTop: number;
+  left: number;
+  top: number;
+};
+
+const MIN_BLUR_SIZE = 0.01;
+
 type CaptionState =
   | { status: "idle" }
   | { status: "running"; message: string }
@@ -320,6 +341,8 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
   const [exportState, setExportState] = useState<ExportState>({ status: "idle" });
   const [captionState, setCaptionState] = useState<CaptionState>({ status: "idle" });
   const [timelineOpen, setTimelineOpen] = useState(false);
+  const [blurring, setBlurring] = useState(false);
+  const [dragBox, setDragBox] = useState<DragBox | null>(null);
   const [glossary, setGlossary] = useGlossary();
   const [saveFailed, setSaveFailed] = useState(false);
 
@@ -387,6 +410,37 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
         setExportState({ status: "failed", message: messageOf(cause) });
       }
     }
+  };
+
+  // canvas は object-contain なので、表示領域の余白を除いた実際の描画位置から変換する。
+  const pointOf = (event: PointerEvent<HTMLElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const scale = Math.min(rect.width / OUTPUT_WIDTH, rect.height / OUTPUT_HEIGHT);
+    const offsetX = (rect.width - OUTPUT_WIDTH * scale) / 2;
+    const offsetY = (rect.height - OUTPUT_HEIGHT * scale) / 2;
+    const left = event.clientX - rect.left;
+    const top = event.clientY - rect.top;
+    return {
+      left,
+      top,
+      canvasX: (left - offsetX) / scale,
+      canvasY: (top - offsetY) / scale,
+    };
+  };
+
+  const finishBlur = (event: PointerEvent<HTMLElement>) => {
+    if (!dragBox) return;
+    const { clip, sourceSec } = locate(doc, timeSec);
+    const end = pointOf(event);
+    const a = previewToVideo(doc, clip.id, sourceSec, dragBox.canvasX, dragBox.canvasY);
+    const b = previewToVideo(doc, clip.id, sourceSec, end.canvasX, end.canvasY);
+    const width = Math.abs(a.x - b.x);
+    const height = Math.abs(a.y - b.y);
+    setDragBox(null);
+    if (width < MIN_BLUR_SIZE || height < MIN_BLUR_SIZE) return;
+    const rect = { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), width, height };
+    edit((current) => addBlur(current, rect));
+    setBlurring(false);
   };
 
   const startCaptions = async () => {
@@ -460,13 +514,47 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
         />
 
         <div className="flex min-w-0 flex-col gap-3">
-          <canvas
-            ref={canvasRef}
-            width={OUTPUT_WIDTH}
-            height={OUTPUT_HEIGHT}
-            aria-label="プレビュー"
-            className="aspect-video max-h-[calc(100dvh-17rem)] w-full rounded-lg object-contain lg:min-h-64"
-          />
+          {blurring && (
+            <p aria-live="polite" className="text-sm text-ink-2">
+              隠したい範囲をプレビュー上でドラッグしてください。動画全体にかかります。
+            </p>
+          )}
+          <div
+            className={`relative touch-none ${blurring ? "cursor-crosshair select-none" : ""}`}
+            onPointerDown={(event) => {
+              if (!blurring) return;
+              event.currentTarget.setPointerCapture(event.pointerId);
+              const { left, top, canvasX, canvasY } = pointOf(event);
+              setDragBox({ canvasX, canvasY, startLeft: left, startTop: top, left, top });
+            }}
+            onPointerMove={(event) => {
+              if (!dragBox) return;
+              const { left, top } = pointOf(event);
+              setDragBox({ ...dragBox, left, top });
+            }}
+            onPointerUp={finishBlur}
+            onPointerCancel={() => setDragBox(null)}
+          >
+            <canvas
+              ref={canvasRef}
+              width={OUTPUT_WIDTH}
+              height={OUTPUT_HEIGHT}
+              aria-label="プレビュー"
+              className="block aspect-video max-h-[calc(100dvh-17rem)] w-full rounded-lg object-contain lg:min-h-64"
+            />
+            {dragBox && (
+              <div
+                aria-hidden
+                className="pointer-events-none absolute border-2 border-accent"
+                style={{
+                  left: Math.min(dragBox.startLeft, dragBox.left),
+                  top: Math.min(dragBox.startTop, dragBox.top),
+                  width: Math.abs(dragBox.left - dragBox.startLeft),
+                  height: Math.abs(dragBox.top - dragBox.startTop),
+                }}
+              />
+            )}
+          </div>
 
           <div className="flex flex-wrap items-center gap-2">
             <button type="button" className={PRIMARY} disabled={exporting} onClick={toggle}>
@@ -489,6 +577,18 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
                 onClick={() => edit((current) => addZoom(current, timeSec)?.doc ?? current)}
               >
                 ズーム
+              </button>
+              <button
+                type="button"
+                aria-pressed={blurring}
+                className={BUTTON}
+                disabled={exporting}
+                onClick={() => {
+                  if (playing) void toggle();
+                  setBlurring((active) => !active);
+                }}
+              >
+                {blurring ? "ぼかしをやめる" : "ぼかす"}
               </button>
               <button
                 type="button"
@@ -577,6 +677,15 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
           caption={captionSpan && bounds && { ...captionSpan, ...bounds }}
           glossary={glossary}
           onGlossary={setGlossary}
+          onBlurScope={(blurId, scope) => {
+            const { sourceStartSec, sourceEndSec } = currentClip;
+            edit((current) =>
+              scope === "all"
+                ? setBlurRange(current, blurId, 0, current.asset.durationSec)
+                : setBlurRange(current, blurId, sourceStartSec, sourceEndSec),
+            );
+          }}
+          onBlurRemove={(blurId) => edit((current) => removeBlur(current, blurId))}
           onLook={(patch) => edit((current) => ({ ...current, look: { ...current.look, ...patch } }))}
           onZoom={(patch) => {
             if (zoom) edit((current) => updateZoom(current, zoom.id, patch));

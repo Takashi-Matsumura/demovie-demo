@@ -36,6 +36,19 @@ const captionSchema = z
   })
   .refine((caption) => caption.sourceEndSec > caption.sourceStartSec);
 
+// クリップに紐づけず素材時刻で持つ。分割や並べ替えをしても、隠す場所が外れないようにするため。
+const blurSchema = z
+  .object({
+    id: z.string(),
+    sourceStartSec: z.number().min(0),
+    sourceEndSec: z.number().min(0),
+    x: z.number().min(0).max(1),
+    y: z.number().min(0).max(1),
+    width: z.number().positive().max(1),
+    height: z.number().positive().max(1),
+  })
+  .refine((blur) => blur.sourceEndSec > blur.sourceStartSec);
+
 const lookSchema = z.object({
   background: z.enum(BACKGROUND_IDS),
   paddingPct: z.number().min(0).max(20),
@@ -57,6 +70,8 @@ export const documentSchema = z.object({
   clips: z.array(clipSchema).min(1),
   zooms: z.array(zoomSchema),
   captions: z.array(captionSchema),
+  // この項目より前に保存した作業を読み込めるよう、既定値を持たせる。
+  blurs: z.array(blurSchema).default([]),
   look: lookSchema,
 });
 
@@ -64,6 +79,7 @@ export type DemoDocument = z.infer<typeof documentSchema>;
 export type Clip = z.infer<typeof clipSchema>;
 export type Zoom = z.infer<typeof zoomSchema>;
 export type Caption = z.infer<typeof captionSchema>;
+export type Blur = z.infer<typeof blurSchema>;
 export type Look = z.infer<typeof lookSchema>;
 export type Asset = z.infer<typeof assetSchema>;
 
@@ -81,6 +97,7 @@ export function createDocument(asset: Asset): DemoDocument {
     ],
     zooms: [],
     captions: [],
+    blurs: [],
     look: { background: "dusk", paddingPct: 6, radiusPct: 2, shadow: true },
   };
 }

@@ -1,5 +1,5 @@
 import type { DemoDocument } from "./document";
-import { cameraAt, captionTextAt } from "./timeline";
+import { blursAt, cameraAt, captionTextAt } from "./timeline";
 
 export const OUTPUT_WIDTH = 1920;
 export const OUTPUT_HEIGHT = 1080;
@@ -14,6 +14,117 @@ export const BACKGROUNDS: Record<
   slate: { label: "石板", from: "#3a424d", to: "#14181d" },
   paper: { label: "紙", from: "#f4efe6", to: "#dcd5c7" },
 };
+
+// 文字を読み取れないよう、1 ブロックを本文の文字より大きくする。
+// 大きさは録画の幅が基準。出力側で決めると、ズームするほど元の映像の情報が残る。
+const MOSAIC_BLOCK_RATIO = 0.02;
+
+type Rect = { x: number; y: number; width: number; height: number };
+
+function frameRectOf(doc: DemoDocument, width: number, height: number, vw: number, vh: number) {
+  const padding = (width * doc.look.paddingPct) / 100;
+  const fit = Math.min((width - padding * 2) / vw, (height - padding * 2) / vh);
+  const frameWidth = vw * fit;
+  const frameHeight = vh * fit;
+  return {
+    x: (width - frameWidth) / 2,
+    y: (height - frameHeight) / 2,
+    width: frameWidth,
+    height: frameHeight,
+  };
+}
+
+function cropOf(doc: DemoDocument, clipId: string, sourceSec: number, vw: number, vh: number) {
+  const camera = cameraAt(doc, clipId, sourceSec);
+  const width = vw / camera.scale;
+  const height = vh / camera.scale;
+  return {
+    x: clamp(camera.centerX * vw - width / 2, 0, vw - width),
+    y: clamp(camera.centerY * vh - height / 2, 0, vh - height),
+    width,
+    height,
+  };
+}
+
+// プレビュー上の座標を、ズームを考慮して動画の座標（0〜1）に変換する。
+export function previewToVideo(
+  doc: DemoDocument,
+  clipId: string,
+  sourceSec: number,
+  canvasX: number,
+  canvasY: number,
+) {
+  const { width: vw, height: vh } = doc.asset;
+  const frame = frameRectOf(doc, OUTPUT_WIDTH, OUTPUT_HEIGHT, vw, vh);
+  const crop = cropOf(doc, clipId, sourceSec, vw, vh);
+  const ratioX = clamp((canvasX - frame.x) / frame.width, 0, 1);
+  const ratioY = clamp((canvasY - frame.y) / frame.height, 0, 1);
+  return {
+    x: (crop.x + ratioX * crop.width) / vw,
+    y: (crop.y + ratioY * crop.height) / vh,
+  };
+}
+
+// ブロックの区切りは録画の座標に固定する。ズームで動くと、コマを重ねて元の内容を推測されやすい。
+export function mosaicGrid(blurWidth: number, blurHeight: number, videoWidth: number) {
+  const block = videoWidth * MOSAIC_BLOCK_RATIO;
+  return {
+    columns: Math.max(1, Math.ceil(blurWidth / block)),
+    rows: Math.max(1, Math.ceil(blurHeight / block)),
+  };
+}
+
+let mosaicCanvas: HTMLCanvasElement | null = null;
+
+function drawBlurs(
+  ctx: CanvasRenderingContext2D,
+  video: HTMLVideoElement,
+  doc: DemoDocument,
+  sourceSec: number,
+  frame: Rect,
+  crop: Rect,
+  vw: number,
+  vh: number,
+) {
+  mosaicCanvas ??= document.createElement("canvas");
+  const mosaic = mosaicCanvas.getContext("2d");
+  if (!mosaic) return;
+  const scale = frame.width / crop.width;
+
+  for (const blur of blursAt(doc, sourceSec)) {
+    const blurX = blur.x * vw;
+    const blurY = blur.y * vh;
+    const blurWidth = blur.width * vw;
+    const blurHeight = blur.height * vh;
+    const left = Math.max(blurX, crop.x);
+    const top = Math.max(blurY, crop.y);
+    const right = Math.min(blurX + blurWidth, crop.x + crop.width);
+    const bottom = Math.min(blurY + blurHeight, crop.y + crop.height);
+    if (right <= left || bottom <= top) continue;
+
+    const { columns, rows } = mosaicGrid(blurWidth, blurHeight, vw);
+    mosaicCanvas.width = columns;
+    mosaicCanvas.height = rows;
+    mosaic.drawImage(video, blurX, blurY, blurWidth, blurHeight, 0, 0, columns, rows);
+
+    const toColumns = columns / blurWidth;
+    const toRows = rows / blurHeight;
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(
+      mosaicCanvas,
+      (left - blurX) * toColumns,
+      (top - blurY) * toRows,
+      (right - left) * toColumns,
+      (bottom - top) * toRows,
+      frame.x + (left - crop.x) * scale,
+      frame.y + (top - crop.y) * scale,
+      (right - left) * scale,
+      (bottom - top) * scale,
+    );
+    ctx.restore();
+  }
+}
 
 // プレビューと書き出しはどちらもこの関数を通す。経路を分けると見た目がズレる。
 export function drawFrame(
@@ -35,15 +146,8 @@ export function drawFrame(
 
   const videoWidth = video.videoWidth || doc.asset.width;
   const videoHeight = video.videoHeight || doc.asset.height;
-  const padding = (width * look.paddingPct) / 100;
-  const fit = Math.min(
-    (width - padding * 2) / videoWidth,
-    (height - padding * 2) / videoHeight,
-  );
-  const frameWidth = videoWidth * fit;
-  const frameHeight = videoHeight * fit;
-  const frameX = (width - frameWidth) / 2;
-  const frameY = (height - frameHeight) / 2;
+  const frame = frameRectOf(doc, width, height, videoWidth, videoHeight);
+  const { x: frameX, y: frameY, width: frameWidth, height: frameHeight } = frame;
   const radius = (width * look.radiusPct) / 100;
 
   if (look.shadow) {
@@ -58,19 +162,7 @@ export function drawFrame(
     ctx.restore();
   }
 
-  const camera = cameraAt(doc, clipId, sourceSec);
-  const sourceWidth = videoWidth / camera.scale;
-  const sourceHeight = videoHeight / camera.scale;
-  const sourceX = clamp(
-    camera.centerX * videoWidth - sourceWidth / 2,
-    0,
-    videoWidth - sourceWidth,
-  );
-  const sourceY = clamp(
-    camera.centerY * videoHeight - sourceHeight / 2,
-    0,
-    videoHeight - sourceHeight,
-  );
+  const crop = cropOf(doc, clipId, sourceSec, videoWidth, videoHeight);
 
   ctx.save();
   ctx.beginPath();
@@ -79,15 +171,16 @@ export function drawFrame(
   if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
     ctx.drawImage(
       video,
-      sourceX,
-      sourceY,
-      sourceWidth,
-      sourceHeight,
+      crop.x,
+      crop.y,
+      crop.width,
+      crop.height,
       frameX,
       frameY,
       frameWidth,
       frameHeight,
     );
+    drawBlurs(ctx, video, doc, sourceSec, frame, crop, videoWidth, videoHeight);
   }
   ctx.restore();
 
