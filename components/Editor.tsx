@@ -508,6 +508,15 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
       <video ref={videoRef} src={source.url} playsInline preload="auto" className="hidden" />
 
       <header className="flex flex-wrap items-center gap-2">
+        {exporting ? (
+          <IconButton label="書き出しを中止" align="start" onClick={() => abortRef.current?.abort()}>
+            <StopIcon />
+          </IconButton>
+        ) : (
+          <IconButton label="書き出す" align="start" tone="primary" disabled={generating} onClick={startExport}>
+            <ExportIcon />
+          </IconButton>
+        )}
         <h1 className="min-w-0 truncate text-sm font-semibold">{source.name}</h1>
         <span
           role={saveFailed ? "alert" : undefined}
@@ -523,21 +532,13 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
         </IconButton>
         <IconButton
           label="閉じる"
+          align="end"
           tone="quiet"
           disabled={exporting || generating}
           onClick={onClose}
         >
           <CloseIcon />
         </IconButton>
-        {exporting ? (
-          <IconButton label="書き出しを中止" align="end" onClick={() => abortRef.current?.abort()}>
-            <StopIcon />
-          </IconButton>
-        ) : (
-          <IconButton label="書き出す" align="end" tone="primary" disabled={generating} onClick={startExport}>
-            <ExportIcon />
-          </IconButton>
-        )}
       </header>
 
       <ServiceStatusBar />
