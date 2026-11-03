@@ -82,6 +82,18 @@ function recordStream(stream: MediaStream) {
 
 export type ScreenRecording = { stop: () => void; finished: Promise<Blob>; mimeType: string };
 
+/** 受け取った映像を録画する。映像が途切れた（共有停止・機器の取り外し）ときも録画を終える。 */
+export function startStreamRecording(stream: MediaStream, onStop?: () => void): ScreenRecording {
+  const { recorder, finished, mimeType } = recordStream(stream);
+  const stop = () => {
+    if (recorder.state !== "inactive") recorder.stop();
+    onStop?.();
+  };
+  stream.getVideoTracks()[0]?.addEventListener("ended", stop);
+  recorder.start(1000);
+  return { stop, finished, mimeType };
+}
+
 export async function startScreenRecording(): Promise<ScreenRecording> {
   if (!navigator.mediaDevices?.getDisplayMedia) {
     throw new Error("このブラウザは画面録画に対応していません。デスクトップ版の Chrome か Edge を使ってください。");
@@ -90,15 +102,7 @@ export async function startScreenRecording(): Promise<ScreenRecording> {
     video: { frameRate: 30 },
     audio: true,
   });
-  const { recorder, finished, mimeType } = recordStream(stream);
-  const stop = () => {
-    if (recorder.state !== "inactive") recorder.stop();
-    stream.getTracks().forEach((track) => track.stop());
-  };
-  // ブラウザ側の「共有を停止」でも録画を終わらせる。
-  stream.getVideoTracks()[0].addEventListener("ended", stop);
-  recorder.start(1000);
-  return { stop, finished, mimeType };
+  return startStreamRecording(stream, () => stream.getTracks().forEach((track) => track.stop()));
 }
 
 const SAMPLE_SEC = 6;
