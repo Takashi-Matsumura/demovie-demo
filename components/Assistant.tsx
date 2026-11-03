@@ -9,6 +9,7 @@ import { resolveTargets } from "@/lib/locate";
 import { applyReview, timelineAt } from "@/lib/review";
 import { startRecording, toWav, transcribe, type VoiceRecording } from "@/lib/speech";
 import { locate } from "@/lib/timeline";
+import { DictateIcon, IconButton, MicIcon, ReviewIcon } from "./IconButton";
 import { ReviewPanel, type ReviewItem, type ReviewStage } from "./ReviewPanel";
 
 type Phase = "idle" | "recording" | "transcribing" | "classifying" | "thinking" | "tidying";
@@ -438,25 +439,22 @@ export function Assistant({
         {(["instruct", "dictate"] as const).map((item) => {
           const active = phase === "recording" && mode === item;
           return (
-            <button
+            <IconButton
               key={item}
-              type="button"
+              label={item === "instruct" ? "押して指示" : "説明文を話す"}
+              hint={item === "instruct" ? "V" : "C"}
+              aria-keyshortcuts={item === "instruct" ? "V" : "C"}
               aria-pressed={active}
               disabled={disabled || (busy && !active)}
-              className={`touch-none rounded-md px-3 py-1.5 text-sm font-medium whitespace-nowrap select-none disabled:cursor-not-allowed disabled:opacity-50 ${
-                active
-                  ? "bg-danger text-paper"
-                  : item === "instruct"
-                    ? "bg-accent text-accent-ink"
-                    : "bg-paper-3 text-ink"
-              }`}
+              tone={active ? "danger" : item === "instruct" ? "primary" : "default"}
+              className="touch-none select-none"
               onPointerDown={() => startListening(item)}
               onPointerUp={stopListening}
               onPointerCancel={stopListening}
               onPointerLeave={stopListening}
             >
-              {item === "instruct" ? "押して指示（V）" : "説明文を話す（C）"}
-            </button>
+              {item === "instruct" ? <MicIcon /> : <DictateIcon />}
+            </IconButton>
           );
         })}
         <input
@@ -468,14 +466,9 @@ export function Assistant({
           onChange={(event) => setText(event.target.value)}
         />
         {!reviewStage && (
-          <button
-            type="button"
-            disabled={disabled || busy}
-            className="rounded-md bg-paper-3 px-3 py-1.5 text-sm whitespace-nowrap hover:bg-rule disabled:cursor-not-allowed disabled:opacity-50"
-            onClick={beginReview}
-          >
-            通しで確認
-          </button>
+          <IconButton label="通しで確認" disabled={disabled || busy} onClick={beginReview}>
+            <ReviewIcon />
+          </IconButton>
         )}
       </form>
 

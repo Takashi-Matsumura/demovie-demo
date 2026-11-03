@@ -55,6 +55,24 @@ import {
   zoomSpans,
 } from "@/lib/timeline";
 import { Assistant } from "./Assistant";
+import {
+  BlurIcon,
+  CaptionAddIcon,
+  CloseIcon,
+  ExportIcon,
+  IconButton,
+  NarratedPlayIcon,
+  PauseIcon,
+  PlayIcon,
+  RedoIcon,
+  SparkleIcon,
+  SpinnerIcon,
+  SplitIcon,
+  StopIcon,
+  TuneIcon,
+  UndoIcon,
+  ZoomIcon,
+} from "./IconButton";
 import { Inspector } from "./Inspector";
 import { ServiceStatusBar } from "./ServiceStatus";
 import { Steps } from "./Steps";
@@ -497,23 +515,28 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
         >
           {saveFailed ? "保存できませんでした" : "自動保存"}
         </span>
-        <button type="button" className={BUTTON} disabled={!canUndo} onClick={undo}>
-          元に戻す
-        </button>
-        <button type="button" className={BUTTON} disabled={!canRedo} onClick={redo}>
-          やり直す
-        </button>
-        <button type="button" className={BUTTON} disabled={exporting || generating} onClick={onClose}>
-          閉じる
-        </button>
+        <IconButton label="元に戻す" tone="quiet" disabled={!canUndo} onClick={undo}>
+          <UndoIcon />
+        </IconButton>
+        <IconButton label="やり直す" tone="quiet" disabled={!canRedo} onClick={redo}>
+          <RedoIcon />
+        </IconButton>
+        <IconButton
+          label="閉じる"
+          tone="quiet"
+          disabled={exporting || generating}
+          onClick={onClose}
+        >
+          <CloseIcon />
+        </IconButton>
         {exporting ? (
-          <button type="button" className={BUTTON} onClick={() => abortRef.current?.abort()}>
-            中止
-          </button>
+          <IconButton label="書き出しを中止" align="end" onClick={() => abortRef.current?.abort()}>
+            <StopIcon />
+          </IconButton>
         ) : (
-          <button type="button" className={PRIMARY} disabled={generating} onClick={startExport}>
-            書き出す
-          </button>
+          <IconButton label="書き出す" align="end" tone="primary" disabled={generating} onClick={startExport}>
+            <ExportIcon />
+          </IconButton>
         )}
       </header>
 
@@ -583,74 +606,75 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <button type="button" className={PRIMARY} disabled={exporting} onClick={toggle}>
-              {playing ? "一時停止" : "再生"}
-            </button>
+            <IconButton
+              label={playing ? "一時停止" : "再生"}
+              tone="primary"
+              disabled={exporting}
+              onClick={toggle}
+            >
+              {playing ? <PauseIcon /> : <PlayIcon />}
+            </IconButton>
             {doc.narration.enabled && !playing && (
-              <button
-                type="button"
-                className={BUTTON}
+              <IconButton
+                label={preparing ? "音声を準備中…" : "ナレーション付きで再生"}
                 disabled={exporting || preparing}
                 onClick={() => void playNarrated()}
               >
-                {preparing ? "音声を準備中…" : "ナレーション付きで再生"}
-              </button>
+                {preparing ? <SpinnerIcon /> : <NarratedPlayIcon />}
+              </IconButton>
             )}
             <span className="font-mono text-sm text-ink-2 tabular-nums">
               {formatTime(timeSec)} / {formatTime(totalDuration(doc))}
             </span>
-            <div className="ml-auto flex flex-wrap gap-2">
-              <button
-                type="button"
-                className={BUTTON}
+            <div className="ml-auto flex flex-wrap gap-1">
+              <IconButton
+                label="ここで手順を分ける"
+                tone="quiet"
                 onClick={() => edit((current) => splitAt(current, timeSec))}
               >
-                ここで手順を分ける
-              </button>
-              <button
-                type="button"
-                className={BUTTON}
+                <SplitIcon />
+              </IconButton>
+              <IconButton
+                label="ズーム"
+                tone="quiet"
                 onClick={() => edit((current) => addZoom(current, timeSec)?.doc ?? current)}
               >
-                ズーム
-              </button>
-              <button
-                type="button"
+                <ZoomIcon />
+              </IconButton>
+              <IconButton
+                label={blurring ? "ぼかしをやめる" : "ぼかす"}
                 aria-pressed={blurring}
-                className={BUTTON}
+                tone={blurring ? "primary" : "quiet"}
                 disabled={exporting}
                 onClick={() => {
                   if (playing) void toggle();
                   setBlurring((active) => !active);
                 }}
               >
-                {blurring ? "ぼかしをやめる" : "ぼかす"}
-              </button>
-              <button
-                type="button"
+                <BlurIcon />
+              </IconButton>
+              <IconButton
+                label="微調整"
                 aria-expanded={timelineOpen}
-                className={BUTTON}
+                tone={timelineOpen ? "default" : "quiet"}
                 onClick={() => setTimelineOpen((open) => !open)}
               >
-                微調整
-              </button>
+                <TuneIcon />
+              </IconButton>
               {generating ? (
-                <button
-                  type="button"
-                  className={BUTTON}
-                  onClick={() => captionAbortRef.current?.abort()}
-                >
-                  生成を中止
-                </button>
+                <IconButton label="生成を中止" align="end" onClick={() => captionAbortRef.current?.abort()}>
+                  <StopIcon />
+                </IconButton>
               ) : (
-                <button
-                  type="button"
-                  className={PRIMARY}
+                <IconButton
+                  label="AI で手順を作成"
+                  align="end"
+                  tone="primary"
                   disabled={exporting}
                   onClick={startCaptions}
                 >
-                  AI で手順を作成
-                </button>
+                  <SparkleIcon />
+                </IconButton>
               )}
             </div>
           </div>
@@ -686,14 +710,13 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
                 onSeek={seek}
               />
               <div>
-                <button
-                  type="button"
-                  className={BUTTON}
+                <IconButton
+                  label="キャプションを追加"
                   disabled={generating || caption !== null}
                   onClick={() => edit((current) => addCaption(current, timeSec))}
                 >
-                  キャプションを追加
-                </button>
+                  <CaptionAddIcon />
+                </IconButton>
               </div>
             </>
           ) : (
