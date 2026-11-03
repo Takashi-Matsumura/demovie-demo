@@ -2,6 +2,7 @@
 
 import type { DemoDocument } from "@/lib/document";
 import { stepSpans } from "@/lib/timeline";
+import { ArrowDownIcon, ArrowUpIcon, IconButton, SpeakerIcon, TrashIcon } from "./IconButton";
 
 type StepsProps = {
   doc: DemoDocument;
@@ -14,9 +15,6 @@ type StepsProps = {
   onMove: (clipId: string, delta: -1 | 1) => void;
   onDelete: (clipId: string) => void;
 };
-
-const ICON_BUTTON =
-  "rounded px-2 py-1 text-xs text-ink-2 hover:bg-rule disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent";
 
 export function Steps({
   doc,
@@ -65,42 +63,43 @@ export function Steps({
                   {index + 1} · {(endSec - startSec).toFixed(1)}秒
                 </button>
                 {doc.narration.enabled && caption?.text.trim() && (
-                  <button
-                    type="button"
-                    aria-label={`手順 ${index + 1} を読み上げ`}
-                    className={ICON_BUTTON}
+                  <IconButton
+                    label={`手順 ${index + 1} を試聴`}
+                    tone="quiet"
+                    size="sm"
                     onClick={() => onSpeak(caption.text)}
                   >
-                    試聴
-                  </button>
+                    <SpeakerIcon className="size-3.5" />
+                  </IconButton>
                 )}
-                <button
-                  type="button"
-                  aria-label={`手順 ${index + 1} を前へ移動`}
-                  className={ICON_BUTTON}
+                <IconButton
+                  label={`手順 ${index + 1} を前へ移動`}
+                  tone="quiet"
+                  size="sm"
                   disabled={index === 0}
                   onClick={() => onMove(clip.id, -1)}
                 >
-                  ↑
-                </button>
-                <button
-                  type="button"
-                  aria-label={`手順 ${index + 1} を後ろへ移動`}
-                  className={ICON_BUTTON}
+                  <ArrowUpIcon className="size-3.5" />
+                </IconButton>
+                <IconButton
+                  label={`手順 ${index + 1} を後ろへ移動`}
+                  tone="quiet"
+                  size="sm"
                   disabled={index === steps.length - 1}
                   onClick={() => onMove(clip.id, 1)}
                 >
-                  ↓
-                </button>
-                <button
-                  type="button"
-                  aria-label={`手順 ${index + 1} を映像ごと削除`}
-                  className={ICON_BUTTON}
+                  <ArrowDownIcon className="size-3.5" />
+                </IconButton>
+                <IconButton
+                  label={`手順 ${index + 1} を映像ごと削除`}
+                  align="end"
+                  tone="quiet"
+                  size="sm"
                   disabled={steps.length < 2}
                   onClick={() => onDelete(clip.id)}
                 >
-                  削除
-                </button>
+                  <TrashIcon className="size-3.5" />
+                </IconButton>
               </div>
               <div className="flex gap-2">
                 <button
