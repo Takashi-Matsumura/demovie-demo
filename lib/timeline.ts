@@ -118,6 +118,20 @@ export function splitAt(doc: DemoDocument, timelineSec: number): DemoDocument {
   return splitSource(doc, clip, sourceSec);
 }
 
+// 検出した位置でまとめて手順を分ける。分けると前半が元の ID を引き継ぐので、
+// 同じクリップの中は後ろの位置から分けて、残りの位置が元の ID のまま指せるようにする。
+export function splitAtSources(
+  doc: DemoDocument,
+  points: { clipId: string; sourceSec: number }[],
+): DemoDocument {
+  return [...points]
+    .sort((a, b) => b.sourceSec - a.sourceSec)
+    .reduce((current, { clipId, sourceSec }) => {
+      const clip = current.clips.find((item) => item.id === clipId);
+      return clip ? splitSource(current, clip, sourceSec) : current;
+    }, doc);
+}
+
 // ステップはクリップそのもの。削除や並べ替えは映像ごと動くようクリップの操作をそのまま使う。
 export function stepSpans(doc: DemoDocument) {
   const captions = captionSpans(doc);

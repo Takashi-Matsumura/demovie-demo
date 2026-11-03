@@ -8,7 +8,7 @@ import {
   type ChangeEvent,
   type PointerEvent,
 } from "react";
-import { generateCaptions } from "@/lib/captions";
+import { detectSplitPoints, generateCaptions } from "@/lib/captions";
 import { createDocument, newId, type DemoDocument } from "@/lib/document";
 import { exportVideo } from "@/lib/export";
 import {
@@ -48,6 +48,7 @@ import {
   setStepText,
   setZoomLength,
   splitAt,
+  splitAtSources,
   totalDuration,
   updateCaption,
   updateZoom,
@@ -66,6 +67,7 @@ import {
   PauseIcon,
   PlayIcon,
   RedoIcon,
+  SceneSplitIcon,
   SparkleIcon,
   SpinnerIcon,
   SplitIcon,
@@ -361,6 +363,7 @@ const END_MARGIN_SEC = 0.05;
 type CaptionState =
   | { status: "idle" }
   | { status: "running"; message: string }
+  | { status: "done"; message: string }
   | { status: "failed"; message: string };
 
 type WorkspaceProps = {
@@ -513,7 +516,46 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
       if (cause instanceof DOMException && cause.name === "AbortError") {
         setCaptionState({ status: "idle" });
       } else {
-        setCaptionState({ status: "failed", message: messageOf(cause) });
+        setCaptionState({
+          status: "failed",
+          message: `キャプションを生成できませんでした。${messageOf(cause)}`,
+        });
+      }
+    }
+  };
+
+  // AI を使わず、画面が変わった位置で手順を分ける。説明文は空のまま残す。
+  const startSceneSplit = async () => {
+    if (playing) void toggle();
+    const controller = new AbortController();
+    captionAbortRef.current = controller;
+    setCaptionState({ status: "running", message: "画面の変化を解析中…" });
+    try {
+      const points = await detectSplitPoints({
+        doc,
+        src: source.url,
+        signal: controller.signal,
+        onProgress: (message) => setCaptionState({ status: "running", message }),
+      });
+      const before = doc.clips.length;
+      const next = splitAtSources(doc, points);
+      const added = next.clips.length - before;
+      if (added > 0) edit(() => next);
+      setCaptionState({
+        status: "done",
+        message:
+          added > 0
+            ? `画面の変化から ${added} か所で手順を分けました。`
+            : "新しく分けられる画面の変化は見つかりませんでした。",
+      });
+    } catch (cause) {
+      if (cause instanceof DOMException && cause.name === "AbortError") {
+        setCaptionState({ status: "idle" });
+      } else {
+        setCaptionState({
+          status: "failed",
+          message: `手順を分けられませんでした。${messageOf(cause)}`,
+        });
       }
     }
   };
@@ -649,6 +691,14 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
                 onClick={() => edit((current) => splitAt(current, timeSec))}
               >
                 <SplitIcon />
+              </IconButton>
+              <IconButton
+                label="画面の変化で手順を分ける"
+                tone="quiet"
+                disabled={exporting || generating}
+                onClick={() => void startSceneSplit()}
+              >
+                <SceneSplitIcon />
               </IconButton>
               <IconButton
                 label="ズーム"
@@ -843,7 +893,14 @@ function CaptionStatus({ state }: { state: CaptionState }) {
   if (state.status === "failed") {
     return (
       <p role="alert" className="text-sm text-danger">
-        キャプションを生成できませんでした。{state.message}
+        {state.message}
+      </p>
+    );
+  }
+  if (state.status === "done") {
+    return (
+      <p role="status" className="text-sm text-ink-2">
+        {state.message}
       </p>
     );
   }

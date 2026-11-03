@@ -139,6 +139,13 @@ export const SplitIcon = (p: IconProps) => (
     <path d="m16 8 4 4-4 4" />
   </Svg>
 );
+export const SceneSplitIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <rect x="2" y="6" width="8" height="12" rx="1.5" />
+    <rect x="14" y="6" width="8" height="12" rx="1.5" />
+    <path d="M12 3v3M12 10v4M12 18v3" />
+  </Svg>
+);
 export const ZoomIcon = (p: IconProps) => (
   <Svg {...p}>
     <circle cx="11" cy="11" r="7" />

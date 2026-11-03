@@ -22,6 +22,7 @@ import {
   setStepText,
   setZoomLength,
   splitAt,
+  splitAtSources,
   stepSpans,
   totalDuration,
   zoomAt,
@@ -37,6 +38,33 @@ function withZoom(doc: DemoDocument, timelineSec: number) {
   if (!result) throw new Error("zoom was not added");
   return result;
 }
+
+describe("splitAtSources", () => {
+  it("splits one clip at several detected points", () => {
+    const base = makeDoc();
+    const clipId = base.clips[0].id;
+    const doc = splitAtSources(base, [
+      { clipId, sourceSec: 3 },
+      { clipId, sourceSec: 7 },
+    ]);
+    expect(doc.clips.map((clip) => [clip.sourceStartSec, clip.sourceEndSec])).toEqual([
+      [0, 3],
+      [3, 7],
+      [7, 10],
+    ]);
+    expect(doc.clips[0].id).toBe(clipId);
+  });
+
+  it("ignores points at a clip edge or in unknown clips", () => {
+    const base = makeDoc();
+    const clipId = base.clips[0].id;
+    const doc = splitAtSources(base, [
+      { clipId, sourceSec: 0 },
+      { clipId: "missing", sourceSec: 5 },
+    ]);
+    expect(doc.clips).toHaveLength(1);
+  });
+});
 
 describe("split", () => {
   it("keeps the total duration and stays contiguous", () => {
