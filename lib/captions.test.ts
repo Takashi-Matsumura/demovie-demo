@@ -7,6 +7,7 @@ import {
   findOperations,
   sampleChanges,
   suggestZoom,
+  tickingMask,
   type Sample,
   splitPointsOf,
 } from "./captions";
@@ -82,6 +83,27 @@ describe("sampleChanges", () => {
     expect(run([frame([]), frame([]), frame([]), after, after, after])).toEqual([
       { beforeSec: 2, afterSec: 3, referenceSec: 0 },
     ]);
+  });
+
+  // 時計の秒は毎回違う数字になるので、毎秒「変わったまま」に見える。
+  const withClock = (pixels: Uint8ClampedArray, sec: number) => {
+    const next = pixels.slice();
+    cells(5000, 30).forEach((index) => {
+      next[index] = 40 + ((sec * 50) % 200);
+    });
+    return next;
+  };
+
+  it("ignores a clock that ticks every second", () => {
+    const frames = Array.from({ length: 12 }, (_, sec) => withClock(frame([]), sec));
+    expect(run(frames)).toEqual([]);
+  });
+
+  it("still detects an operation while a clock is ticking", () => {
+    const frames = Array.from({ length: 12 }, (_, sec) =>
+      withClock(frame(sec >= 6 ? cells(0, 30) : []), sec),
+    );
+    expect(run(frames)).toEqual([{ beforeSec: 5, afterSec: 6, referenceSec: 0 }]);
   });
 
   it("does not trust a change it cannot confirm on the last sample", () => {
@@ -194,5 +216,34 @@ describe("splitPointsOf", () => {
     expect(splitPointsOf([{ clip, operation: { beforeSec: 1, afterSec: 3 } }])).toEqual([
       { clipId: "c", sourceSec: 2 },
     ]);
+  });
+});
+
+describe("tickingMask", () => {
+  const SIZE = 160 * 90;
+  const frames = (count: number, changing: number) =>
+    Array.from({ length: count }, (_, sec) => {
+      const signature = new Uint8ClampedArray(SIZE);
+      signature.fill(40 + ((sec * 50) % 200), 0, changing);
+      return { sec, signature };
+    });
+
+  it("marks a small area that changes every time, with a margin around it", () => {
+    const mask = tickingMask([frames(10, 30)]);
+    expect(mask?.[0]).toBe(1);
+    expect(mask?.[160 + 30]).toBe(1);
+    expect(mask?.[SIZE - 1]).toBe(0);
+  });
+
+  it("does not mark a screen that is mostly moving, such as a video", () => {
+    expect(tickingMask([frames(10, SIZE / 2)])).toBeNull();
+  });
+
+  it("does not guess from too few samples", () => {
+    expect(tickingMask([frames(4, 30)])).toBeNull();
+  });
+
+  it("counts samples across clips", () => {
+    expect(tickingMask([frames(4, 30), frames(4, 30)])).not.toBeNull();
   });
 });
