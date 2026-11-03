@@ -27,6 +27,12 @@ const MIN_ZOOM_DEPTH = 1.3;
 const MAX_ZOOM_DEPTH = 2.2;
 const REGION_FILL = 0.8;
 const MIN_AUTO_ZOOM_SEC = 1;
+// 時計の秒表示のように、ほとんど毎回変わるマスは操作ではないので数えない。
+const TICK_SHARE = 0.5;
+// 比べた回数が少ないと、たまたま続いた変化と区別できない。
+const TICK_MIN_PAIRS = 6;
+// 画面の広い範囲が変わり続けるのは時計ではなく動画や動きのある画面。外すと何も検出できなくなる。
+const MAX_TICK_AREA = 0.05;
 
 const PROMPT = `操作の後の画面で新しく表示された内容を重視して、ユーザーが行った操作を、操作説明動画の手順として日本語で1文にしてください。
 ・「〜を開きます」「〜を入力します」のように、30字以内の丁寧語で書く
@@ -61,10 +67,12 @@ export function changedRegion(
   previous: Uint8ClampedArray,
   current: Uint8ClampedArray,
   width: number,
+  ignored: Uint8Array | null = null,
 ): Region | null {
   const xs: number[] = [];
   const ys: number[] = [];
   for (let index = 0; index < current.length; index += 1) {
+    if (ignored?.[index]) continue;
     if (Math.abs(current[index] - previous[index]) <= PIXEL_THRESHOLD) continue;
     xs.push(index % width);
     ys.push(Math.floor(index / width));
@@ -122,15 +130,58 @@ export function findOperations(samples: Sample[]) {
 
 export type SignatureFrame = { sec: number; signature: Uint8ClampedArray };
 
+// 録画全体を通して、比べるたびにほぼ毎回変わるマスを探す。BIOS の時計などが該当する。
+// 文字の縁のにじみも拾えるよう、見つけたマスの周り 1 マスまで広げる。
+export function tickingMask(groups: SignatureFrame[][], width = SIGNATURE_WIDTH) {
+  const size = groups.find((frames) => frames.length > 0)?.[0].signature.length;
+  if (!size) return null;
+  const counts = new Uint16Array(size);
+  let pairs = 0;
+  for (const frames of groups) {
+    for (let index = 1; index < frames.length; index += 1) {
+      const previous = frames[index - 1].signature;
+      const current = frames[index].signature;
+      pairs += 1;
+      for (let cell = 0; cell < size; cell += 1) {
+        if (Math.abs(current[cell] - previous[cell]) > PIXEL_THRESHOLD) counts[cell] += 1;
+      }
+    }
+  }
+  if (pairs < TICK_MIN_PAIRS) return null;
+
+  const height = Math.ceil(size / width);
+  const mask = new Uint8Array(size);
+  let ticking = 0;
+  counts.forEach((count, cell) => {
+    if (count < pairs * TICK_SHARE) return;
+    ticking += 1;
+    const x = cell % width;
+    const y = Math.floor(cell / width);
+    for (let dy = -1; dy <= 1; dy += 1) {
+      for (let dx = -1; dx <= 1; dx += 1) {
+        const nx = x + dx;
+        const ny = y + dy;
+        if (nx >= 0 && nx < width && ny >= 0 && ny < height && ny * width + nx < size) {
+          mask[ny * width + nx] = 1;
+        }
+      }
+    }
+  });
+  if (ticking === 0 || ticking / size > MAX_TICK_AREA) return null;
+  return mask;
+}
+
 // 基準の画面から変わったままのマスだけを数える。動き続けるカーソルは次のコマで別の場所へ
 // 移るので数えられず、入力や画面の切り替えは残るので数えられる。
 function persistentRatio(
   baseline: Uint8ClampedArray,
   current: Uint8ClampedArray,
   next: Uint8ClampedArray,
+  ignored: Uint8Array | null,
 ) {
   let changed = 0;
   for (let index = 0; index < current.length; index += 1) {
+    if (ignored?.[index]) continue;
     const moved = Math.abs(current[index] - baseline[index]) > PIXEL_THRESHOLD;
     if (moved && Math.abs(next[index] - baseline[index]) > PIXEL_THRESHOLD) changed += 1;
   }
@@ -153,13 +204,13 @@ function settledFrame(frames: SignatureFrame[], index: number): SignatureFrame {
 
 // 直前のコマとだけ比べると、1 文字ずつの入力は毎回の変化が小さくて見逃すので、
 // 操作を検出した時点の画面と比べ続けて変化を積み上げる。
-export function sampleChanges(frames: SignatureFrame[]) {
+export function sampleChanges(frames: SignatureFrame[], ignored = tickingMask([frames])) {
   let baseline = settledFrame(frames, 0);
   return frames.map(({ sec, signature }, index): Sample => {
     // 最後のコマは残るかどうかを確かめられないので、カーソルを誤検出しないよう数えない。
     const next = frames[index + 1]?.signature;
     if (index === 0 || !next) return { sec, ratio: 0 };
-    const ratio = persistentRatio(baseline.signature, signature, next);
+    const ratio = persistentRatio(baseline.signature, signature, next, ignored);
     const sample = { sec, ratio, baselineSec: baseline.sec };
     if (ratio >= CHANGE_RATIO) baseline = settledFrame(frames, index);
     return sample;
@@ -273,7 +324,7 @@ async function scanOperations(
   signal: AbortSignal,
   onProgress?: (message: string) => void,
 ) {
-  const found: FoundOperation[] = [];
+  const groups: SignatureFrame[][] = [];
   for (const [clipIndex, clip] of doc.clips.entries()) {
     onProgress?.(`画面の変化を解析中 ${clipIndex + 1} / ${doc.clips.length}`);
     const frames: SignatureFrame[] = [];
@@ -282,13 +333,19 @@ async function scanOperations(
       await seekTo(video, sec);
       frames.push({ sec, signature: signatureOf(ctx, video) });
     }
-    const operations = findOperations(sampleChanges(frames));
+    groups.push(frames);
+  }
+  // 時計は録画全体で探す。分割後の短い手順だけでは、毎秒変わることを確かめられない。
+  const ignored = tickingMask(groups);
+  const found: FoundOperation[] = [];
+  doc.clips.forEach((clip, clipIndex) => {
+    const operations = findOperations(sampleChanges(groups[clipIndex], ignored));
     operations.forEach((operation, index) => {
       const next = operations[index + 1]?.beforeSec ?? clip.sourceEndSec;
       found.push({ clip, operation, endSec: Math.min(operation.afterSec + HOLD_SEC, next) });
     });
-  }
-  return found;
+  });
+  return { found, ignored };
 }
 
 /** 手順の区切り位置。操作が始まる直前のコマで分ける。 */
@@ -309,7 +366,7 @@ type DetectOptions = {
 // AI を使わず、画面が変わった位置だけを返す。BIOS のようにカーソルの無い画面や、
 // 解析サーバが使えないときでも手順に分けられるようにする。
 export async function detectSplitPoints({ doc, src, signal, onProgress }: DetectOptions) {
-  const found = await withAnalyzer(src, (analyzer) =>
+  const { found } = await withAnalyzer(src, (analyzer) =>
     scanOperations(analyzer, doc, signal, onProgress),
   );
   return splitPointsOf(found);
@@ -333,7 +390,7 @@ export async function generateCaptions({
 }: GenerateOptions) {
   return withAnalyzer(src, async (analyzer) => {
     const { video, ctx } = analyzer;
-    const found = await scanOperations(analyzer, doc, signal, onProgress);
+    const { found, ignored } = await scanOperations(analyzer, doc, signal, onProgress);
     if (found.length === 0) throw new Error("画面の変化が見つかりませんでした。");
 
     const captions: Caption[] = [];
@@ -346,7 +403,12 @@ export async function generateCaptions({
       const beforeSignature: Uint8ClampedArray = signatureOf(ctx, video);
       const settled = operation.afterSec + SETTLE_SEC;
       await seekTo(video, Math.min(settled, clip.sourceEndSec - END_MARGIN_SEC));
-      const region = changedRegion(beforeSignature, signatureOf(ctx, video), SIGNATURE_WIDTH);
+      const region = changedRegion(
+        beforeSignature,
+        signatureOf(ctx, video),
+        SIGNATURE_WIDTH,
+        ignored,
+      );
       const text = await describe(before, frameUrl(video), buildPrompt(doc.purpose, glossary), signal);
       const sourceStartSec = Math.max(operation.beforeSec, clip.sourceStartSec);
       if (!text || endSec <= sourceStartSec) continue;
