@@ -55,6 +55,7 @@ import {
   zoomSpans,
 } from "@/lib/timeline";
 import { Assistant } from "./Assistant";
+import { CapturePanel } from "./CapturePanel";
 import {
   BlurIcon,
   CaptionAddIcon,
@@ -166,6 +167,7 @@ type StartScreenProps = {
 function StartScreen({ error, onError, onOpen, onResume }: StartScreenProps) {
   const [busy, setBusy] = useState<"sample" | null>(null);
   const [recording, setRecording] = useState<ScreenRecording | null>(null);
+  const [capturing, setCapturing] = useState(false);
 
   const startRecording = async () => {
     onError(null);
@@ -211,7 +213,9 @@ function StartScreen({ error, onError, onOpen, onResume }: StartScreenProps) {
           </p>
         </div>
 
-        {recording ? (
+        {capturing ? (
+          <CapturePanel onCancel={() => setCapturing(false)} onOpen={onOpen} />
+        ) : recording ? (
           <button type="button" className={PRIMARY} onClick={recording.stop}>
             録画を止めて編集する
           </button>
@@ -224,6 +228,17 @@ function StartScreen({ error, onError, onOpen, onResume }: StartScreenProps) {
               onClick={startRecording}
             >
               画面を録画
+            </button>
+            <button
+              type="button"
+              className={BUTTON}
+              disabled={busy !== null}
+              onClick={() => {
+                onError(null);
+                setCapturing(true);
+              }}
+            >
+              キャプチャ機器から録画
             </button>
             <label
               className={`${BUTTON} cursor-pointer focus-within:outline-2 focus-within:outline-accent`}
