@@ -240,22 +240,10 @@ async function describe(before: string, after: string, prompt: string, signal: A
   return cleanCaption(data.choices?.[0]?.message?.content ?? "");
 }
 
-type GenerateOptions = {
-  doc: DemoDocument;
-  glossary: string;
-  src: string;
-  signal: AbortSignal;
-  onProgress: (message: string) => void;
-};
+type FoundOperation = { clip: Clip; operation: Operation; endSec: number };
+type Analyzer = { video: HTMLVideoElement; ctx: CanvasRenderingContext2D };
 
-// 変化のあった箇所だけ VLM に渡す。全区間を送ると 1 枚ごとに数秒かかり、静止画面の説明も増える。
-export async function generateCaptions({
-  doc,
-  glossary,
-  src,
-  signal,
-  onProgress,
-}: GenerateOptions) {
+async function withAnalyzer<T>(src: string, run: (analyzer: Analyzer) => Promise<T>) {
   const canvas = document.createElement("canvas");
   canvas.width = SIGNATURE_WIDTH;
   canvas.height = SIGNATURE_HEIGHT;
@@ -272,20 +260,80 @@ export async function generateCaptions({
   try {
     // 読み込み直後の最初の読み取りが黒くなり、全画面の変化と誤判定することがある。
     await seekTo(video, FIRST_READ_SEC);
-    const found: { clip: Clip; operation: Operation; endSec: number }[] = [];
-    for (const clip of doc.clips) {
-      const frames: SignatureFrame[] = [];
-      for (const sec of sampleTimes(clip)) {
-        signal.throwIfAborted();
-        await seekTo(video, sec);
-        frames.push({ sec, signature: signatureOf(ctx, video) });
-      }
-      const operations = findOperations(sampleChanges(frames));
-      operations.forEach((operation, index) => {
-        const next = operations[index + 1]?.beforeSec ?? clip.sourceEndSec;
-        found.push({ clip, operation, endSec: Math.min(operation.afterSec + HOLD_SEC, next) });
-      });
+    return await run({ video, ctx });
+  } finally {
+    video.removeAttribute("src");
+    video.load();
+  }
+}
+
+async function scanOperations(
+  { video, ctx }: Analyzer,
+  doc: DemoDocument,
+  signal: AbortSignal,
+  onProgress?: (message: string) => void,
+) {
+  const found: FoundOperation[] = [];
+  for (const [clipIndex, clip] of doc.clips.entries()) {
+    onProgress?.(`画面の変化を解析中 ${clipIndex + 1} / ${doc.clips.length}`);
+    const frames: SignatureFrame[] = [];
+    for (const sec of sampleTimes(clip)) {
+      signal.throwIfAborted();
+      await seekTo(video, sec);
+      frames.push({ sec, signature: signatureOf(ctx, video) });
     }
+    const operations = findOperations(sampleChanges(frames));
+    operations.forEach((operation, index) => {
+      const next = operations[index + 1]?.beforeSec ?? clip.sourceEndSec;
+      found.push({ clip, operation, endSec: Math.min(operation.afterSec + HOLD_SEC, next) });
+    });
+  }
+  return found;
+}
+
+/** 手順の区切り位置。操作が始まる直前のコマで分ける。 */
+export function splitPointsOf(found: Pick<FoundOperation, "clip" | "operation">[]) {
+  return found.map(({ clip, operation }) => ({
+    clipId: clip.id,
+    sourceSec: Math.max(operation.beforeSec, clip.sourceStartSec),
+  }));
+}
+
+type DetectOptions = {
+  doc: DemoDocument;
+  src: string;
+  signal: AbortSignal;
+  onProgress?: (message: string) => void;
+};
+
+// AI を使わず、画面が変わった位置だけを返す。BIOS のようにカーソルの無い画面や、
+// 解析サーバが使えないときでも手順に分けられるようにする。
+export async function detectSplitPoints({ doc, src, signal, onProgress }: DetectOptions) {
+  const found = await withAnalyzer(src, (analyzer) =>
+    scanOperations(analyzer, doc, signal, onProgress),
+  );
+  return splitPointsOf(found);
+}
+
+type GenerateOptions = {
+  doc: DemoDocument;
+  glossary: string;
+  src: string;
+  signal: AbortSignal;
+  onProgress: (message: string) => void;
+};
+
+// 変化のあった箇所だけ VLM に渡す。全区間を送ると 1 枚ごとに数秒かかり、静止画面の説明も増える。
+export async function generateCaptions({
+  doc,
+  glossary,
+  src,
+  signal,
+  onProgress,
+}: GenerateOptions) {
+  return withAnalyzer(src, async (analyzer) => {
+    const { video, ctx } = analyzer;
+    const found = await scanOperations(analyzer, doc, signal, onProgress);
     if (found.length === 0) throw new Error("画面の変化が見つかりませんでした。");
 
     const captions: Caption[] = [];
@@ -309,8 +357,5 @@ export async function generateCaptions({
       }
     }
     return { captions, zooms };
-  } finally {
-    video.removeAttribute("src");
-    video.load();
-  }
+  });
 }

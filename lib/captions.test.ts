@@ -8,6 +8,7 @@ import {
   sampleChanges,
   suggestZoom,
   type Sample,
+  splitPointsOf,
 } from "./captions";
 
 function samples(ratios: number[]): Sample[] {
@@ -177,5 +178,21 @@ describe("suggestZoom", () => {
     expect(suggestZoom(region(0.4))).toEqual({ depth: 2, focusX: 0.3, focusY: 0.7 });
     expect(suggestZoom(region(0.05))?.depth).toBe(2.2);
     expect(suggestZoom(region(0.6))?.depth).toBe(1.3);
+  });
+});
+
+describe("splitPointsOf", () => {
+  const clip = { id: "c", sourceStartSec: 2, sourceEndSec: 10 };
+
+  it("splits just before each operation", () => {
+    expect(splitPointsOf([{ clip, operation: { beforeSec: 5, afterSec: 6 } }])).toEqual([
+      { clipId: "c", sourceSec: 5 },
+    ]);
+  });
+
+  it("does not reach before the clip start", () => {
+    expect(splitPointsOf([{ clip, operation: { beforeSec: 1, afterSec: 3 } }])).toEqual([
+      { clipId: "c", sourceSec: 2 },
+    ]);
   });
 });
