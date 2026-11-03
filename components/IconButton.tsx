@@ -21,8 +21,8 @@ type Props = Omit<ButtonHTMLAttributes<HTMLButtonElement>, "children" | "aria-la
   hint?: string;
   tone?: Tone;
   size?: keyof typeof SIZE;
-  /** 右端に置くボタンは "end" にして、ツールチップが外へはみ出さないようにする。 */
-  align?: "center" | "end";
+  /** 端に置くボタンは "start" / "end" にして、ツールチップが外へはみ出さないようにする。 */
+  align?: "start" | "center" | "end";
   children: ReactNode;
 };
 
@@ -52,7 +52,7 @@ export function IconButton({
         aria-hidden
         // 非表示の間は display:none にして、親のスクロール領域を広げないようにする。
         className={`pointer-events-none absolute top-full z-20 mt-1 hidden rounded bg-ink px-2 py-1 text-xs whitespace-nowrap text-paper group-hover:block group-has-[:focus-visible]:block ${
-          align === "end" ? "right-0" : "left-1/2 -translate-x-1/2"
+          align === "end" ? "right-0" : align === "start" ? "left-0" : "left-1/2 -translate-x-1/2"
         }`}
       >
         {label}
