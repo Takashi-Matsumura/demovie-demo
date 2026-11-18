@@ -3,17 +3,17 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import type { DemoDocument } from "@/lib/document";
 import { applyReadings } from "@/lib/glossary";
-import { narratedSteps, synthesize } from "@/lib/narration";
+import { chapterText, narrationParts, synthesize, type VoicePart } from "@/lib/narration";
 import { stepSpans } from "@/lib/timeline";
 
 export type VoicePlayback = {
   active: () => boolean;
   speaking: () => boolean;
-  start: (clipId: string) => void;
+  start: (clipId: string, part: VoicePart) => void;
   stop: () => void;
 };
 
-// ナレーション付きの再生で、手順に入ったら説明文を読み上げる。
+// ナレーション付きの再生で、手順に入ったら説明文を、カテゴリ画面に入ったらその文を読み上げる。
 export function useVoicePlayback(
   doc: DemoDocument,
   glossary: string,
@@ -35,12 +35,12 @@ export function useVoicePlayback(
   const voiceRef = useRef<VoicePlayback>({
     active: () => activeRef.current,
     speaking: () => speakingRef.current,
-    start: (clipId) => {
+    start: (clipId, part) => {
       if (!activeRef.current) return;
       const { doc: current, glossary: terms } = latestRef.current;
-      const text = stepSpans(current)
-        .find((step) => step.clip.id === clipId)
-        ?.caption?.text.trim();
+      const step = stepSpans(current).find((item) => item.clip.id === clipId);
+      const text =
+        part === "chapter" ? chapterText(step?.clip.chapter) : step?.caption?.text.trim();
       if (!text) return;
 
       const request = ++requestRef.current;
@@ -84,7 +84,7 @@ export function useVoicePlayback(
       await context.resume();
       const { doc: current, glossary: terms } = latestRef.current;
       const { voiceId, speed, keepOriginalAudio } = current.narration;
-      for (const { text } of narratedSteps(current)) {
+      for (const { text } of narrationParts(current)) {
         await synthesize(applyReadings(text, terms), voiceId, speed);
       }
       activeRef.current = true;

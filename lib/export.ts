@@ -1,7 +1,7 @@
 import type { DemoDocument } from "./document";
 import { pickMimeType, seekTo, waitForEvent } from "./media";
-import { prepareNarration } from "./narration";
-import { drawFrame, OUTPUT_HEIGHT, OUTPUT_WIDTH } from "./render";
+import { prepareNarration, voiceKey } from "./narration";
+import { drawChapter, drawFrame, OUTPUT_HEIGHT, OUTPUT_WIDTH } from "./render";
 import { clipSpans, totalDuration } from "./timeline";
 
 const FPS = 30;
@@ -75,6 +75,33 @@ function holdLastFrame(voiceEnded: Promise<void>, signal: AbortSignal, draw: () 
   });
 }
 
+// カテゴリ画面を決まった秒数だけ描き続ける。読み上げが長いときは読み終わるまで延ばす。
+function showFor(
+  durationSec: number,
+  voiceEnded: Promise<void>,
+  signal: AbortSignal,
+  draw: (elapsedSec: number) => void,
+) {
+  let speaking = true;
+  void voiceEnded.then(() => {
+    speaking = false;
+  });
+  const startedAt = performance.now();
+  return new Promise<void>((resolve, reject) => {
+    const tick = () => {
+      if (signal.aborted) {
+        reject(new DOMException("書き出しを中止しました。", "AbortError"));
+        return;
+      }
+      const elapsedSec = (performance.now() - startedAt) / 1000;
+      draw(Math.min(elapsedSec, durationSec));
+      if (elapsedSec >= durationSec && !speaking) resolve();
+      else requestAnimationFrame(tick);
+    };
+    tick();
+  });
+}
+
 // 動画を実際に再生しながら Canvas を録画するので、書き出しには動画と同じ時間がかかる。
 export async function exportVideo({
   doc: edited,
@@ -127,23 +154,40 @@ export async function exportVideo({
   const stopped = waitForEvent(recorder, "stop");
 
   const total = totalDuration(doc);
+  const record = () => {
+    if (recorder.state === "inactive") recorder.start(250);
+    else recorder.resume();
+  };
+  const speak = (key: string) => {
+    const voice = narration.get(key);
+    return audioContext && audioOutput && voice
+      ? playVoice(audioContext, voice, audioOutput)
+      : Promise.resolve();
+  };
   try {
     for (const span of clipSpans(doc)) {
       const { clip } = span;
       if (recorder.state === "recording") recorder.pause();
+
+      if (clip.chapter) {
+        const { chapter } = clip;
+        drawChapter(ctx, doc, chapter);
+        record();
+        await showFor(chapter.durationSec, speak(voiceKey(clip.id, "chapter")), signal, (sec) => {
+          drawChapter(ctx, doc, chapter);
+          onProgress((span.startSec + sec) / total);
+        });
+        recorder.pause();
+      }
+
       // 開始時刻ちょうどだと直前のコマ、つまり削除した区間の最後が映ることがある。
       const firstSec = clip.sourceStartSec + FRAME_SEC;
       await seekTo(video, firstSec);
       drawFrame(ctx, video, doc, clip.id, firstSec);
-      if (recorder.state === "inactive") recorder.start(250);
-      else recorder.resume();
+      record();
 
       await video.play();
-      const voice = narration.get(clip.id);
-      const voiceEnded =
-        audioContext && audioOutput && voice
-          ? playVoice(audioContext, voice, audioOutput)
-          : Promise.resolve();
+      const voiceEnded = speak(voiceKey(clip.id, "step"));
       await new Promise<void>((resolve, reject) => {
         const tick = () => {
           if (signal.aborted) {
@@ -157,14 +201,14 @@ export async function exportVideo({
           }
           const sourceSec = video.currentTime;
           drawFrame(ctx, video, doc, clip.id, sourceSec);
-          onProgress((span.startSec + sourceSec - clip.sourceStartSec) / total);
+          onProgress((span.videoStartSec + sourceSec - clip.sourceStartSec) / total);
           requestAnimationFrame(tick);
         };
         tick();
       });
       video.pause();
 
-      if (narration.has(clip.id)) {
+      if (narration.has(voiceKey(clip.id, "step"))) {
         // 止まった位置は手順の外なので、手順の中へ戻してから待つ。
         const lastSec = clip.sourceEndSec - LAST_FRAME_MARGIN_SEC;
         await seekTo(video, lastSec);

@@ -13,7 +13,7 @@ export function timelineAt(doc: DemoDocument, sourceSec: number) {
   const span = clipSpans(doc).find(
     ({ clip }) => sourceSec >= clip.sourceStartSec && sourceSec < clip.sourceEndSec,
   );
-  return span ? span.startSec + sourceSec - span.clip.sourceStartSec : null;
+  return span ? span.videoStartSec + sourceSec - span.clip.sourceStartSec : null;
 }
 
 // 手順番号は確認を終えた時点の番号で固定する。1 件の失敗で残りを止めない。

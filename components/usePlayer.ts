@@ -2,13 +2,16 @@
 
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import type { DemoDocument } from "@/lib/document";
-import { drawFrame } from "@/lib/render";
+import { voiceKey } from "@/lib/narration";
+import { drawAt } from "@/lib/render";
 import { clipSpans, locate, totalDuration } from "@/lib/timeline";
 import type { VoicePlayback } from "./useVoicePlayback";
 
 const END_EPSILON_SEC = 0.02;
 // 手順の途中から再生したときは、文の頭から読むと映像とズレるので読まない。
 const VOICE_START_WINDOW_SEC = 0.5;
+// 読み上げを待つ間、カテゴリ画面の区間に留まるための小さな余白。
+const CHAPTER_HOLD_SEC = 0.001;
 
 export function usePlayer(
   doc: DemoDocument,
@@ -32,8 +35,7 @@ export function usePlayer(
     const ctx = canvasRef.current?.getContext("2d");
     const video = videoRef.current;
     if (!ctx || !video) return;
-    const { clip, sourceSec } = locate(docRef.current, timeRef.current);
-    drawFrame(ctx, video, docRef.current, clip.id, sourceSec);
+    drawAt(ctx, video, docRef.current, timeRef.current);
   }, [canvasRef, videoRef]);
 
   const placeVideo = useCallback(() => {
@@ -70,6 +72,11 @@ export function usePlayer(
       return;
     }
     if (timeRef.current >= totalDuration(docRef.current) - END_EPSILON_SEC) seek(0);
+    // カテゴリ画面の区間は映像を止めたまま進めるので、映像は区間が終わってから流す。
+    if (locate(docRef.current, timeRef.current).inChapter) {
+      updatePlaying(true);
+      return;
+    }
     try {
       await video.play();
       updatePlaying(true);
@@ -100,18 +107,50 @@ export function usePlayer(
   useEffect(() => {
     if (!playing) return;
     let frame = 0;
-    const tick = () => {
+    let lastAt = performance.now();
+    const tick = (now: number) => {
+      const elapsedSec = Math.max(0, (now - lastAt) / 1000);
+      lastAt = now;
       const video = videoRef.current;
       if (!video) return;
       const spans = clipSpans(docRef.current);
-      const index = locate(docRef.current, timeRef.current).index;
+      const { index, inChapter } = locate(docRef.current, timeRef.current);
       const span = spans[index];
-      const reachedEnd = video.ended || video.currentTime >= span.clip.sourceEndSec - END_EPSILON_SEC;
-
       const voice = voiceRef.current;
-      if (voice.active() && spokenClipRef.current !== span.clip.id) {
-        spokenClipRef.current = span.clip.id;
-        if (timeRef.current - span.startSec < VOICE_START_WINDOW_SEC) voice.start(span.clip.id);
+
+      if (inChapter) {
+        // カテゴリ画面は映像を止めたまま、経過時間で進める。読み上げ中は区間の終わりで待つ。
+        if (!video.paused) video.pause();
+        const key = voiceKey(span.clip.id, "chapter");
+        if (voice.active() && spokenClipRef.current !== key) {
+          spokenClipRef.current = key;
+          if (timeRef.current - span.startSec < VOICE_START_WINDOW_SEC) {
+            voice.start(span.clip.id, "chapter");
+          }
+        }
+        const nextSec = timeRef.current + elapsedSec;
+        if (nextSec < span.videoStartSec) {
+          timeRef.current = nextSec;
+        } else if (voice.speaking()) {
+          timeRef.current = span.videoStartSec - CHAPTER_HOLD_SEC;
+        } else {
+          timeRef.current = span.videoStartSec;
+          video.currentTime = span.clip.sourceStartSec;
+          void video.play();
+        }
+        setTimeSec(timeRef.current);
+        paint();
+        frame = requestAnimationFrame(tick);
+        return;
+      }
+
+      const reachedEnd = video.ended || video.currentTime >= span.clip.sourceEndSec - END_EPSILON_SEC;
+      const key = voiceKey(span.clip.id, "step");
+      if (voice.active() && spokenClipRef.current !== key) {
+        spokenClipRef.current = key;
+        if (timeRef.current - span.videoStartSec < VOICE_START_WINDOW_SEC) {
+          voice.start(span.clip.id, "step");
+        }
       }
 
       if (reachedEnd && voice.speaking()) {
@@ -136,9 +175,12 @@ export function usePlayer(
         }
         timeRef.current = next.startSec;
         video.currentTime = next.clip.sourceStartSec;
-        if (video.paused) void video.play();
+        // 次の手順がカテゴリ画面から始まるなら、映像はその区間が終わるまで流さない。
+        if (next.clip.chapter) video.pause();
+        else if (video.paused) void video.play();
       } else {
-        timeRef.current = span.startSec + Math.max(0, video.currentTime - span.clip.sourceStartSec);
+        timeRef.current =
+          span.videoStartSec + Math.max(0, video.currentTime - span.clip.sourceStartSec);
       }
       setTimeSec(timeRef.current);
       paint();

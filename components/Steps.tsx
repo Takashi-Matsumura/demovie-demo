@@ -1,11 +1,13 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import type { DemoDocument } from "@/lib/document";
+import { DEFAULT_CHAPTER_SEC, type Chapter, type DemoDocument } from "@/lib/document";
 import { canExclude, stepSpans } from "@/lib/timeline";
 import {
   ArrowDownIcon,
   ArrowUpIcon,
+  ChapterIcon,
+  CloseIcon,
   EyeIcon,
   EyeOffIcon,
   IconButton,
@@ -23,6 +25,7 @@ type StepsProps = {
   onSpeak: (text: string) => void;
   onMove: (clipId: string, delta: -1 | 1) => void;
   onInclude: (clipId: string, included: boolean) => void;
+  onChapter: (clipId: string, chapter: Chapter | null) => void;
   onDelete: (clipId: string) => void;
 };
 
@@ -36,6 +39,7 @@ export function Steps({
   onSpeak,
   onMove,
   onInclude,
+  onChapter,
   onDelete,
 }: StepsProps) {
   const steps = stepSpans(doc);
@@ -48,7 +52,10 @@ export function Steps({
       ?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [selectedClipId]);
   const excluded = steps.filter((step) => !step.included);
-  const excludedSec = excluded.reduce((total, step) => total + step.durationSec, 0);
+  const excludedSec = excluded.reduce(
+    (total, step) => total + step.chapterSec + step.durationSec,
+    0,
+  );
 
   return (
     <aside className="flex min-h-0 flex-col gap-4 rounded-lg bg-paper-2 p-4">
@@ -83,10 +90,19 @@ export function Steps({
                 included ? "bg-paper-3" : "border border-dashed border-rule bg-paper-2"
               } ${clip.id === selectedClipId ? "ring-2 ring-accent" : ""}`}
               onClick={(event) => {
-                if ((event.target as HTMLElement).closest("button, textarea")) return;
+                const target = event.target as HTMLElement;
+                if (target.closest("button, textarea, input, select")) return;
                 onSelect(clip.id);
               }}
             >
+              {clip.chapter && (
+                <ChapterEditor
+                  number={index + 1}
+                  chapter={clip.chapter}
+                  onFocus={() => onSelect(clip.id)}
+                  onChange={(chapter) => onChapter(clip.id, chapter)}
+                />
+              )}
               <div className="flex items-center gap-1">
                 <button
                   type="button"
@@ -105,6 +121,19 @@ export function Steps({
                     onClick={() => onSpeak(caption.text)}
                   >
                     <SpeakerIcon className="size-3.5" />
+                  </IconButton>
+                )}
+                {!clip.chapter && (
+                  <IconButton
+                    label={`手順 ${index + 1} の前にカテゴリ画面を入れる`}
+                    tone="quiet"
+                    size="sm"
+                    onClick={() => {
+                      onChapter(clip.id, { title: "", note: "", durationSec: DEFAULT_CHAPTER_SEC });
+                      onSelect(clip.id);
+                    }}
+                  >
+                    <ChapterIcon className="size-3.5" />
                   </IconButton>
                 )}
                 <IconButton
@@ -184,5 +213,67 @@ export function Steps({
         </ol>
       </section>
     </aside>
+  );
+}
+
+const CHAPTER_SEC_OPTIONS = [2, 3, 5, 7, 10];
+
+type ChapterEditorProps = {
+  number: number;
+  chapter: Chapter;
+  onFocus: () => void;
+  onChange: (chapter: Chapter | null) => void;
+};
+
+// 手順の前に差し込むカテゴリ画面の中身。手順のカードの上に見出しとして置く。
+function ChapterEditor({ number, chapter, onFocus, onChange }: ChapterEditorProps) {
+  const options = CHAPTER_SEC_OPTIONS.includes(chapter.durationSec)
+    ? CHAPTER_SEC_OPTIONS
+    : [...CHAPTER_SEC_OPTIONS, chapter.durationSec].sort((a, b) => a - b);
+  return (
+    <div className="mb-1 flex flex-col gap-1.5 rounded border-l-4 border-accent bg-zoom/40 p-2">
+      <div className="flex items-center gap-1.5">
+        <ChapterIcon className="size-3.5 text-accent" />
+        <span className="mr-auto text-xs font-semibold">カテゴリ画面</span>
+        <select
+          aria-label={`手順 ${number} の前のカテゴリ画面の表示時間`}
+          className="rounded bg-paper-2 px-1 py-0.5 text-xs"
+          value={chapter.durationSec}
+          onFocus={onFocus}
+          onChange={(event) => onChange({ ...chapter, durationSec: Number(event.target.value) })}
+        >
+          {options.map((sec) => (
+            <option key={sec} value={sec}>
+              {sec}秒
+            </option>
+          ))}
+        </select>
+        <IconButton
+          label={`手順 ${number} の前のカテゴリ画面を外す`}
+          align="end"
+          tone="quiet"
+          size="sm"
+          onClick={() => onChange(null)}
+        >
+          <CloseIcon className="size-3.5" />
+        </IconButton>
+      </div>
+      <input
+        aria-label={`手順 ${number} の前のカテゴリ名`}
+        className="rounded bg-paper-2 px-2 py-1 text-sm font-semibold"
+        placeholder="カテゴリ名（例: 初期設定）"
+        value={chapter.title}
+        onFocus={onFocus}
+        onChange={(event) => onChange({ ...chapter, title: event.target.value })}
+      />
+      <input
+        aria-label={`手順 ${number} の前のカテゴリの補足`}
+        className="rounded bg-paper-2 px-2 py-1 text-xs"
+        placeholder="補足（任意）"
+        value={chapter.note}
+        onFocus={onFocus}
+        onChange={(event) => onChange({ ...chapter, note: event.target.value })}
+      />
+    </div>
   );
 }
