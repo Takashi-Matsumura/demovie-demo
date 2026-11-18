@@ -11,6 +11,7 @@ import {
 import { detectSplitPoints, generateCaptions } from "@/lib/captions";
 import { createDocument, newId, type DemoDocument } from "@/lib/document";
 import { exportVideo } from "@/lib/export";
+import { formatTime } from "@/lib/format";
 import {
   extensionFor,
   generateSample,
@@ -47,6 +48,7 @@ import {
   setCaptionRange,
   setClipIncluded,
   setStepText,
+  stepSpans,
   setZoomLength,
   splitAt,
   splitAtSources,
@@ -84,6 +86,7 @@ import { useGlossary } from "./useGlossary";
 import { useSpeech } from "./useSpeech";
 import { useThumbnails } from "./useThumbnails";
 import { useVoicePlayback } from "./useVoicePlayback";
+import { StepBar } from "./StepBar";
 import { Timeline } from "./Timeline";
 import { useDocument } from "./useDocument";
 import { usePlayer } from "./usePlayer";
@@ -395,12 +398,35 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
   const { speak, error: speechError } = useSpeech();
   const [saveFailed, setSaveFailed] = useState(false);
 
+  // 動画に含めない手順は再生位置に乗らないので、選んだときだけ覚えておく。
+  // 止まったままその手順の入る位置にいる間だけ有効で、再生や移動をすると再生位置の手順に戻る。
+  const [pickedHidden, setPickedHidden] = useState<{ clipId: string; atSec: number } | null>(
+    null,
+  );
+  const hiddenClipId =
+    pickedHidden &&
+    !playing &&
+    pickedHidden.atSec === timeSec &&
+    doc.clips.some((clip) => clip.id === pickedHidden.clipId && clip.hidden)
+      ? pickedHidden.clipId
+      : null;
+
   // 編集対象のズームとキャプションは選択状態を持たず、再生位置から決める。
-  const zoom = zoomAt(doc, timeSec)?.zoom ?? null;
-  const captionSpan = captionAt(doc, timeSec) ?? null;
+  // 含めない手順を選んでいる間は、隣の手順のものを編集しないよう出さない。
+  const zoom = hiddenClipId ? null : (zoomAt(doc, timeSec)?.zoom ?? null);
+  const captionSpan = hiddenClipId ? null : (captionAt(doc, timeSec) ?? null);
   const caption = captionSpan?.caption ?? null;
   const bounds = caption && captionBounds(doc, caption.id);
   const currentClip = locate(doc, timeSec).clip;
+  const selectedClipId = hiddenClipId ?? currentClip.id;
+
+  const selectStep = (clipId: string) => {
+    const step = stepSpans(doc).find((item) => item.clip.id === clipId);
+    if (!step) return;
+    const atSec = Math.min(step.startSec, totalDuration(doc));
+    seek(atSec);
+    setPickedHidden(step.included ? null : { clipId, atSec });
+  };
   const exporting = exportState.status === "running";
   const generating = captionState.status === "running";
 
@@ -611,10 +637,10 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
       <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[20rem_minmax(0,1fr)] xl:grid-cols-[20rem_minmax(0,1fr)_16rem]">
         <Steps
           doc={doc}
-          currentClipId={currentClip.id}
+          selectedClipId={selectedClipId}
           thumbnailOf={thumbnailOf}
           onPurpose={(purpose) => edit((current) => ({ ...current, purpose }))}
-          onSelect={seek}
+          onSelect={selectStep}
           onText={(clipId, text) => edit((current) => setStepText(current, clipId, text))}
           onSpeak={(text) => void speak(doc, text, glossary)}
           onMove={(clipId, delta) => edit((current) => moveClip(current, clipId, delta))}
@@ -790,14 +816,12 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
               </div>
             </>
           ) : (
-            <input
-              type="range"
-              aria-label="再生位置"
-              value={timeSec}
-              min={0}
-              max={totalDuration(doc)}
-              step={0.1}
-              onChange={(event) => seek(Number(event.target.value))}
+            <StepBar
+              doc={doc}
+              timeSec={timeSec}
+              selectedClipId={selectedClipId}
+              onSeek={seek}
+              onSelectStep={selectStep}
             />
           )}
         </div>
@@ -909,12 +933,6 @@ function CaptionStatus({ state }: { state: CaptionState }) {
     );
   }
   return null;
-}
-
-function formatTime(totalSec: number) {
-  const minutes = Math.floor(totalSec / 60);
-  const seconds = (totalSec - minutes * 60).toFixed(1).padStart(4, "0");
-  return `${minutes}:${seconds}`;
 }
 
 function messageOf(cause: unknown) {

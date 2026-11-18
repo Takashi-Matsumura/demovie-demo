@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import type { DemoDocument } from "@/lib/document";
 import { canExclude, stepSpans } from "@/lib/timeline";
 import {
@@ -14,10 +15,10 @@ import {
 
 type StepsProps = {
   doc: DemoDocument;
-  currentClipId: string;
+  selectedClipId: string;
   thumbnailOf: (clip: { sourceStartSec: number; sourceEndSec: number }) => string | undefined;
   onPurpose: (purpose: string) => void;
-  onSelect: (startSec: number) => void;
+  onSelect: (clipId: string) => void;
   onText: (clipId: string, text: string) => void;
   onSpeak: (text: string) => void;
   onMove: (clipId: string, delta: -1 | 1) => void;
@@ -27,7 +28,7 @@ type StepsProps = {
 
 export function Steps({
   doc,
-  currentClipId,
+  selectedClipId,
   thumbnailOf,
   onPurpose,
   onSelect,
@@ -38,6 +39,14 @@ export function Steps({
   onDelete,
 }: StepsProps) {
   const steps = stepSpans(doc);
+  const listRef = useRef<HTMLOListElement>(null);
+
+  // 再生バーや再生で選ぶ手順が変わったとき、一覧でもその手順が見えるようにする。
+  useEffect(() => {
+    listRef.current
+      ?.querySelector('[aria-current="step"]')
+      ?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [selectedClipId]);
   const excluded = steps.filter((step) => !step.included);
   const excludedSec = excluded.reduce((total, step) => total + step.durationSec, 0);
 
@@ -63,21 +72,27 @@ export function Steps({
             </span>
           )}
         </h2>
-        <ol className="flex flex-col gap-2 overflow-y-auto lg:max-h-[calc(100dvh-16rem)]">
-          {steps.map(({ clip, caption, startSec, durationSec, included }, index) => (
+        <ol ref={listRef} className="flex flex-col gap-2 overflow-y-auto lg:max-h-[calc(100dvh-16rem)]">
+          {steps.map(({ clip, caption, durationSec, included }, index) => (
+            // カードのどこを押しても選べるようにする。ボタンと入力欄は自分の操作を優先し、
+            // キーボードでは「手順 n へ移動」ボタンで選ぶ。
             <li
               key={clip.id}
-              aria-current={clip.id === currentClipId ? "step" : undefined}
-              className={`flex flex-col gap-1 rounded p-2 ring-inset ${
+              aria-current={clip.id === selectedClipId ? "step" : undefined}
+              className={`flex cursor-pointer flex-col gap-1 rounded p-2 ring-inset ${
                 included ? "bg-paper-3" : "border border-dashed border-rule bg-paper-2"
-              } ${clip.id === currentClipId ? "ring-2 ring-accent" : ""}`}
+              } ${clip.id === selectedClipId ? "ring-2 ring-accent" : ""}`}
+              onClick={(event) => {
+                if ((event.target as HTMLElement).closest("button, textarea")) return;
+                onSelect(clip.id);
+              }}
             >
               <div className="flex items-center gap-1">
                 <button
                   type="button"
                   aria-label={`手順 ${index + 1} へ移動`}
                   className="mr-auto rounded px-1 font-mono text-xs text-ink-2 tabular-nums hover:bg-rule"
-                  onClick={() => onSelect(startSec)}
+                  onClick={() => onSelect(clip.id)}
                 >
                   {index + 1} · {durationSec.toFixed(1)}秒
                   {!included && <span className="ml-1.5 font-sans">含めない</span>}
@@ -144,7 +159,7 @@ export function Steps({
                   type="button"
                   aria-label={`手順 ${index + 1} の画面へ移動`}
                   className="aspect-video w-20 shrink-0 self-start overflow-hidden rounded bg-paper-2"
-                  onClick={() => onSelect(startSec)}
+                  onClick={() => onSelect(clip.id)}
                 >
                   {thumbnailOf(clip) && (
                     // 生成した data URL なので next/image の最適化は使えない。
@@ -159,7 +174,7 @@ export function Steps({
                   placeholder="説明文を入力"
                   value={caption?.text ?? ""}
                   onFocus={() => {
-                    if (clip.id !== currentClipId) onSelect(startSec);
+                    if (clip.id !== selectedClipId) onSelect(clip.id);
                   }}
                   onChange={(event) => onText(clip.id, event.target.value)}
                 />
