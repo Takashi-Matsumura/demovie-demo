@@ -10,7 +10,7 @@ import {
 } from "react";
 import { detectSplitPoints, generateCaptions } from "@/lib/captions";
 import { createDocument, newId, type DemoDocument } from "@/lib/document";
-import { exportVideo } from "@/lib/export";
+import { defaultExportAudio, exportVideo, type ExportAudio } from "@/lib/export";
 import { formatTime } from "@/lib/format";
 import {
   extensionFor,
@@ -390,6 +390,8 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
   const { voiceRef, activate, preparing, error: voiceError } = useVoicePlayback(doc, glossary, videoRef);
   const { timeSec, playing, seek, toggle } = usePlayer(doc, videoRef, canvasRef, voiceRef);
   const [exportState, setExportState] = useState<ExportState>({ status: "idle" });
+  // 書き出す前に、入れる音を選んでもらう。null のときは設定欄を閉じている。
+  const [exportAudio, setExportAudio] = useState<ExportAudio | null>(null);
   const [captionState, setCaptionState] = useState<CaptionState>({ status: "idle" });
   const [timelineOpen, setTimelineOpen] = useState(false);
   const [blurring, setBlurring] = useState(false);
@@ -460,7 +462,8 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [redo, toggle, undo]);
 
-  const startExport = async () => {
+  const startExport = async (audio: ExportAudio) => {
+    setExportAudio(null);
     if (playing) void toggle();
     const controller = new AbortController();
     abortRef.current = controller;
@@ -468,6 +471,7 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
     try {
       const { blob, mimeType } = await exportVideo({
         doc,
+        audio,
         glossary,
         src: source.url,
         signal: controller.signal,
@@ -597,7 +601,14 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
             <StopIcon />
           </IconButton>
         ) : (
-          <IconButton label="書き出す" align="start" tone="primary" disabled={generating} onClick={startExport}>
+          <IconButton
+            label="書き出す"
+            align="start"
+            tone="primary"
+            aria-expanded={exportAudio !== null}
+            disabled={generating}
+            onClick={() => setExportAudio((open) => (open ? null : defaultExportAudio(doc)))}
+          >
             <ExportIcon />
           </IconButton>
         )}
@@ -626,6 +637,15 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
       </header>
 
       <ServiceStatusBar />
+      {exportAudio && (
+        <ExportSettings
+          audio={exportAudio}
+          narrationAvailable={doc.narration.enabled}
+          onChange={setExportAudio}
+          onCancel={() => setExportAudio(null)}
+          onStart={() => void startExport(exportAudio)}
+        />
+      )}
       <ExportStatus state={exportState} />
       <CaptionStatus state={captionState} />
       {(speechError ?? voiceError) && (
@@ -882,6 +902,72 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
   );
 }
 
+type ExportSettingsProps = {
+  audio: ExportAudio;
+  narrationAvailable: boolean;
+  onChange: (audio: ExportAudio) => void;
+  onCancel: () => void;
+  onStart: () => void;
+};
+
+function ExportSettings({
+  audio,
+  narrationAvailable,
+  onChange,
+  onCancel,
+  onStart,
+}: ExportSettingsProps) {
+  const silent = !audio.narration && !audio.original;
+  return (
+    <section
+      aria-label="書き出しの設定"
+      className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-lg bg-paper-2 px-4 py-3 text-sm"
+    >
+      <span className="font-semibold">書き出す音声</span>
+      <label
+        className={`flex items-center gap-2 ${narrationAvailable ? "" : "text-ink-2 opacity-60"}`}
+      >
+        <input
+          type="checkbox"
+          className="size-4 accent-accent"
+          checked={audio.narration}
+          disabled={!narrationAvailable}
+          onChange={(event) => onChange({ ...audio, narration: event.target.checked })}
+        />
+        ナレーション
+      </label>
+      <label className="flex items-center gap-2">
+        <input
+          type="checkbox"
+          className="size-4 accent-accent"
+          checked={audio.original}
+          onChange={(event) => onChange({ ...audio, original: event.target.checked })}
+        />
+        録画の音
+      </label>
+      <span className="text-xs text-ink-2">
+        {silent
+          ? "音声なしで書き出します。"
+          : !narrationAvailable
+            ? "ナレーションは右の「ナレーション」をオンにすると選べます。"
+            : ""}
+      </span>
+      <span className="ml-auto flex gap-2">
+        <button type="button" className="rounded px-3 py-1.5 hover:bg-rule" onClick={onCancel}>
+          キャンセル
+        </button>
+        <button
+          type="button"
+          className="rounded bg-accent px-3 py-1.5 font-semibold text-accent-ink hover:opacity-90"
+          onClick={onStart}
+        >
+          書き出しを始める
+        </button>
+      </span>
+    </section>
+  );
+}
+
 function ExportStatus({ state }: { state: ExportState }) {
   if (state.status === "running") {
     return (
@@ -893,7 +979,7 @@ function ExportStatus({ state }: { state: ExportState }) {
   if (state.status === "done") {
     return (
       <p aria-live="polite" className="text-sm text-ink-2">
-        書き出しが完了しました。{" "}
+        書き出しが完了しました。動画はまだこのタブの中にあり、ファイルとして保存されていません。{" "}
         <a href={state.url} download={state.fileName} className="text-accent underline">
           {state.fileName} を保存
         </a>
