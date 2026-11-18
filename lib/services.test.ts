@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { canReadImages, checkServices } from "./services";
+import {
+  canReadImages,
+  checkServices,
+  isDown,
+  SERVICES,
+  type ServiceState,
+} from "./services";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -20,7 +26,9 @@ const up = {
 };
 
 const states = async () =>
-  Object.fromEntries((await checkServices()).map(({ id, state }) => [id, state]));
+  Object.fromEntries(
+    (await checkServices()).map(({ id, state }) => [id, state]),
+  );
 
 describe("canReadImages", () => {
   it("needs a server with vision", () => {
@@ -61,5 +69,23 @@ describe("checkServices", () => {
   it("treats a missing Jev key as off, not as a failure", async () => {
     stub({ ...up, "/api/intent": { configured: false } });
     expect((await states()).intent).toBe("off");
+  });
+});
+
+describe("isDown", () => {
+  const withWhisper = (state: ServiceState) =>
+    SERVICES.map((service) => ({
+      ...service,
+      state: service.id === "whisper" ? state : "ok",
+    }));
+
+  it("is true only when the service is known to be down", () => {
+    expect(isDown(withWhisper("down"), "whisper")).toBe(true);
+    expect(isDown(withWhisper("ok"), "whisper")).toBe(false);
+    expect(isDown(withWhisper("down"), "llm")).toBe(false);
+  });
+
+  it("treats a service as usable until the first check finishes", () => {
+    expect(isDown([], "whisper")).toBe(false);
   });
 });

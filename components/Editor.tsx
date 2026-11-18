@@ -81,7 +81,9 @@ import {
   ZoomIcon,
 } from "./IconButton";
 import { Inspector } from "./Inspector";
+import { isDown } from "@/lib/services";
 import { ServiceStatusBar } from "./ServiceStatus";
+import { useServices } from "./useServices";
 import { Steps } from "./Steps";
 import { useGlossary } from "./useGlossary";
 import { useSpeech } from "./useSpeech";
@@ -175,6 +177,7 @@ function StartScreen({ error, onError, onOpen, onResume }: StartScreenProps) {
   const [busy, setBusy] = useState<"sample" | null>(null);
   const [recording, setRecording] = useState<ScreenRecording | null>(null);
   const [capturing, setCapturing] = useState(false);
+  const services = useServices();
 
   const startRecording = async () => {
     onError(null);
@@ -270,7 +273,7 @@ function StartScreen({ error, onError, onOpen, onResume }: StartScreenProps) {
           </p>
         )}
 
-        <ServiceStatusBar />
+        <ServiceStatusBar services={services} />
 
         <RecentProjects onError={onError} onResume={onResume} />
       </div>
@@ -386,6 +389,7 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const services = useServices();
   const captionAbortRef = useRef<AbortController | null>(null);
   const [glossary, setGlossary] = useGlossary();
   const { voiceRef, activate, preparing, error: voiceError } = useVoicePlayback(doc, glossary, videoRef);
@@ -637,7 +641,7 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
         </IconButton>
       </header>
 
-      <ServiceStatusBar />
+      <ServiceStatusBar services={services} />
       {exportAudio && (
         <ExportSettings
           audio={exportAudio}
@@ -804,6 +808,7 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
             glossary={glossary}
             ended={!playing && timeSec >= totalDuration(doc) - END_MARGIN_SEC}
             disabled={exporting || generating}
+            speechReady={!isDown(services, "whisper")}
             onListen={() => {
               if (playing) void toggle();
             }}

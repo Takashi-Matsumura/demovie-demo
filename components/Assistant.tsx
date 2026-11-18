@@ -40,6 +40,8 @@ type AssistantProps = {
   glossary: string;
   ended: boolean;
   disabled: boolean;
+  /** 音声認識のサーバが止まっているときは false。音声の操作だけを止め、文字の指示は残す。 */
+  speechReady: boolean;
   onListen: () => void;
   onApply: (result: Extract<CommandResult, { kind: "applied" }>) => void;
   onUndo: () => void;
@@ -53,6 +55,7 @@ export function Assistant({
   glossary,
   ended,
   disabled,
+  speechReady,
   onListen,
   onApply,
   onUndo,
@@ -166,7 +169,7 @@ export function Assistant({
 
   const startListening = useCallback(
     (nextMode: Mode) => {
-    if (recordingRef.current || disabled) return;
+    if (recordingRef.current || disabled || !speechReady) return;
     if (nextMode === "instruct" && reviewStageRef.current === "listening") {
       // 通しの確認では再生を止めない。
     } else if (reviewStageRef.current) {
@@ -194,7 +197,7 @@ export function Assistant({
       });
     });
     },
-    [disabled, onListen],
+    [disabled, onListen, speechReady],
   );
 
   const stopListening = useCallback(() => {
@@ -229,7 +232,11 @@ export function Assistant({
       const recording = await started;
       setPhase("transcribing");
       const blob = await recording.stop();
-      const transcript = await transcribe(await toWav(blob), signal).catch((cause: unknown) => {
+      // 押してすぐ離すと録音が空になり、ブラウザの英語のエラーがそのまま出るので言い換える。
+      const wav = await toWav(blob).catch(() => {
+        throw new Error("音声を聞き取れませんでした。ボタンを押したまま話してください。");
+      });
+      const transcript = await transcribe(wav, signal).catch((cause: unknown) => {
         if (signal.aborted) throw cause;
         throw cause instanceof Error && cause.message.includes("サーバ")
           ? cause
@@ -441,11 +448,13 @@ export function Assistant({
           return (
             <IconButton
               key={item}
-              label={item === "instruct" ? "押して指示" : "説明文を話す"}
+              label={`${item === "instruct" ? "押して指示" : "説明文を話す"}${
+                speechReady ? "" : "（音声認識が停止中）"
+              }`}
               hint={item === "instruct" ? "V" : "C"}
               aria-keyshortcuts={item === "instruct" ? "V" : "C"}
               aria-pressed={active}
-              disabled={disabled || (busy && !active)}
+              disabled={disabled || !speechReady || (busy && !active)}
               tone={active ? "danger" : item === "instruct" ? "primary" : "default"}
               className="touch-none select-none"
               onPointerDown={() => startListening(item)}
@@ -466,7 +475,12 @@ export function Assistant({
           onChange={(event) => setText(event.target.value)}
         />
         {!reviewStage && (
-          <IconButton label="通しで確認" disabled={disabled || busy} onClick={beginReview}>
+          // 通しの確認は話した指示を集める機能なので、音声認識なしでは始めない。
+          <IconButton
+            label={`通しで確認${speechReady ? "" : "（音声認識が停止中）"}`}
+            disabled={disabled || busy || !speechReady}
+            onClick={beginReview}
+          >
             <ReviewIcon />
           </IconButton>
         )}
