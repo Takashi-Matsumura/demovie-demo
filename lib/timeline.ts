@@ -2,6 +2,8 @@ import { newId, type Blur, type Caption, type Clip, type DemoDocument, type Zoom
 
 // タイムライン時刻と素材時刻の変換はこのファイルだけが行う。
 // クリップは常に隙間なく連続するので、タイムライン時刻はクリップ長の累積で決まる。
+// 動画に含めないクリップはタイムラインに載せない。再生も書き出しもタイムラインをたどるので、
+// ここで外せば仕上がりから消える。手順の一覧と手順番号だけは、含めないクリップも数える。
 
 const MIN_ZOOM_SEC = 0.3;
 const DEFAULT_ZOOM_SEC = 2;
@@ -13,13 +15,18 @@ const BLUR_MARGIN_SEC = 1 / 30;
 
 export type ClipSpan = { clip: Clip; startSec: number; endSec: number };
 
-export type Location = { clip: Clip; index: number; sourceSec: number };
+/** index はタイムライン上の順番、step は含めない手順も数えた手順番号の添字。 */
+export type Location = { clip: Clip; index: number; step: number; sourceSec: number };
 
 export type Camera = { scale: number; centerX: number; centerY: number };
 
+export function isIncluded(clip: Clip) {
+  return !clip.hidden;
+}
+
 export function clipSpans(doc: DemoDocument): ClipSpan[] {
   let cursor = 0;
-  return doc.clips.map((clip) => {
+  return doc.clips.filter(isIncluded).map((clip) => {
     const startSec = cursor;
     cursor += clip.sourceEndSec - clip.sourceStartSec;
     return { clip, startSec, endSec: cursor };
@@ -41,6 +48,7 @@ export function locate(doc: DemoDocument, timelineSec: number): Location {
   return {
     clip: span.clip,
     index: resolved,
+    step: doc.clips.indexOf(span.clip),
     sourceSec: span.clip.sourceStartSec + offset,
   };
 }
@@ -103,7 +111,7 @@ function splitSource(doc: DemoDocument, clip: Clip, sourceSec: number): DemoDocu
     return doc;
   }
   const head: Clip = { ...clip, sourceEndSec: sourceSec };
-  const tail: Clip = { id: newId(), sourceStartSec: sourceSec, sourceEndSec: clip.sourceEndSec };
+  const tail: Clip = { ...clip, id: newId(), sourceStartSec: sourceSec };
   const clips = doc.clips.flatMap((item) => (item.id === clip.id ? [head, tail] : [item]));
   return {
     ...doc,
@@ -132,16 +140,50 @@ export function splitAtSources(
     }, doc);
 }
 
+function firstCaption(doc: DemoDocument, clip: Clip) {
+  return (
+    doc.captions
+      .filter(
+        (caption) =>
+          caption.clipId === clip.id &&
+          Math.min(caption.sourceEndSec, clip.sourceEndSec) >
+            Math.max(caption.sourceStartSec, clip.sourceStartSec),
+      )
+      .sort((a, b) => a.sourceStartSec - b.sourceStartSec)[0] ?? null
+  );
+}
+
 // ステップはクリップそのもの。削除や並べ替えは映像ごと動くようクリップの操作をそのまま使う。
+// 含めない手順はタイムライン上の長さが 0 で、startSec は含めたときに入る位置を指す。
 export function stepSpans(doc: DemoDocument) {
-  const captions = captionSpans(doc);
-  return clipSpans(doc).map((span) => ({
-    ...span,
-    caption:
-      captions
-        .filter(({ caption }) => caption.clipId === span.clip.id)
-        .sort((a, b) => a.startSec - b.startSec)[0]?.caption ?? null,
-  }));
+  let cursor = 0;
+  return doc.clips.map((clip) => {
+    const durationSec = clip.sourceEndSec - clip.sourceStartSec;
+    const included = isIncluded(clip);
+    const startSec = cursor;
+    if (included) cursor += durationSec;
+    const caption = firstCaption(doc, clip);
+    return { clip, startSec, endSec: cursor, durationSec, included, caption };
+  });
+}
+
+// 含める手順を 1 つも残さない変更はしない。タイムラインが空になると再生も書き出しもできないため。
+export function setClipIncluded(
+  doc: DemoDocument,
+  clipId: string,
+  included: boolean,
+): DemoDocument {
+  const clip = doc.clips.find((item) => item.id === clipId);
+  if (!clip || isIncluded(clip) === included) return doc;
+  if (!included && doc.clips.filter(isIncluded).length < 2) return doc;
+  const next: Clip = { ...clip, hidden: !included };
+  if (included) delete next.hidden;
+  return { ...doc, clips: doc.clips.map((item) => (item.id === clipId ? next : item)) };
+}
+
+export function canExclude(doc: DemoDocument, clipId: string) {
+  const clip = doc.clips.find((item) => item.id === clipId);
+  return !!clip && isIncluded(clip) && doc.clips.filter(isIncluded).length > 1;
 }
 
 export function setStepText(doc: DemoDocument, clipId: string, text: string): DemoDocument {
@@ -166,6 +208,10 @@ export function applySteps(
   zooms: Zoom[] = [],
 ): DemoDocument {
   const hasClip = (item: Caption | Zoom) => doc.clips.some((clip) => clip.id === item.clipId);
+  // 解析は含める手順だけが対象。含めない手順の説明文は、戻したときのために残す。
+  const excludedIds = new Set(doc.clips.filter((clip) => !isIncluded(clip)).map((clip) => clip.id));
+  const kept = doc.captions.filter((caption) => excludedIds.has(caption.clipId));
+  const added = captions.filter(hasClip).filter((caption) => !excludedIds.has(caption.clipId));
   const isFree = (zoom: Zoom) =>
     !doc.zooms.some(
       (item) =>
@@ -175,10 +221,10 @@ export function applySteps(
     );
   let next: DemoDocument = {
     ...doc,
-    captions: captions.filter(hasClip),
+    captions: [...kept, ...added],
     zooms: [...doc.zooms, ...zooms.filter(hasClip).filter(isFree)],
   };
-  for (const { id } of next.captions) {
+  for (const { id } of added) {
     const caption = next.captions.find((item) => item.id === id);
     const clip = next.clips.find((item) => item.id === caption?.clipId);
     if (caption && clip) next = splitSource(next, clip, caption.sourceStartSec);
@@ -203,7 +249,9 @@ export function applySteps(
 }
 
 export function deleteClip(doc: DemoDocument, clipId: string): DemoDocument {
-  if (doc.clips.length <= 1) return doc;
+  // 含める手順は、ほかに含める手順が残るときだけ消せる。
+  const clip = doc.clips.find((item) => item.id === clipId);
+  if (!clip || (isIncluded(clip) && !canExclude(doc, clipId))) return doc;
   return {
     ...doc,
     clips: doc.clips.filter((clip) => clip.id !== clipId),

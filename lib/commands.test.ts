@@ -142,6 +142,34 @@ describe("describeState", () => {
   });
 });
 
+describe("excluding steps", () => {
+  it("excludes and includes a step by its number", () => {
+    const base = threeSteps();
+    const { doc } = applied(base, [{ type: "exclude_step", step: 2 }]);
+    expect(totalDuration(doc)).toBe(6);
+    expect(describeState(doc, 4)).toMatchObject({ playheadStep: 3 });
+    expect(describeState(doc, 0).steps[1]).toMatchObject({ step: 2, seconds: 3, included: false });
+
+    const restored = applied(doc, [{ type: "include_step", step: 2 }]).doc;
+    expect(totalDuration(restored)).toBe(9);
+  });
+
+  it("refuses to exclude the last step in the video", () => {
+    const base = threeSteps();
+    const { doc } = applied(base, [
+      { type: "exclude_step", step: 1 },
+      { type: "exclude_step", step: 2 },
+    ]);
+    const result = applyCommands(doc, [{ type: "exclude_step", step: 3 }], 0);
+    expect(result.kind).toBe("failed");
+  });
+
+  it("does not seek to an excluded step", () => {
+    const { doc } = applied(threeSteps(), [{ type: "exclude_step", step: 2 }]);
+    expect(applyCommands(doc, [{ type: "seek_step", step: 2 }], 0).kind).toBe("failed");
+  });
+});
+
 describe("commandListSchema", () => {
   it("rejects operations outside the list", () => {
     const parsed = commandListSchema.safeParse({ commands: [{ type: "drop_table" }] });

@@ -10,6 +10,9 @@ const clipSchema = z
     id: z.string(),
     sourceStartSec: z.number().min(0),
     sourceEndSec: z.number().min(0),
+    // 消す前に仕上がりを確かめられるよう、映像や説明文を残したまま再生と書き出しから外す。
+    // この項目より前に保存した作業もそのまま読めるよう、省略できるようにしている。
+    hidden: z.boolean().optional(),
   })
   .refine((clip) => clip.sourceEndSec > clip.sourceStartSec);
 
@@ -85,7 +88,13 @@ export const documentSchema = z.object({
   schemaVersion: z.literal(SCHEMA_VERSION),
   asset: assetSchema,
   purpose: z.string(),
-  clips: z.array(clipSchema).min(1),
+  clips: z
+    .array(clipSchema)
+    .min(1)
+    .refine(
+      (clips) => clips.some((clip) => !clip.hidden),
+      "動画に含める手順が 1 つ以上必要です。",
+    ),
   zooms: z.array(zoomSchema),
   captions: z.array(captionSchema),
   // この項目より前に保存した作業を読み込めるよう、既定値を持たせる。

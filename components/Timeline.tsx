@@ -95,13 +95,14 @@ export function Timeline({
       </div>
 
       <div className="relative flex-1 overflow-hidden rounded bg-paper-2">
-        {clipSpans(doc).map(({ clip, startSec, endSec }, index) => (
+        {clipSpans(doc).map(({ clip, startSec, endSec }) => (
           <div
             key={clip.id}
             style={{ left: percent(startSec), width: percent(endSec - startSec) }}
             className="absolute inset-y-0 border-r-2 border-paper bg-paper-3 px-2 py-1.5 font-mono text-xs text-ink-2 last:border-r-0"
           >
-            {index + 1}
+            {/* 手順の一覧と番号を揃える。含めない手順もあいだで数える。 */}
+            {doc.clips.indexOf(clip) + 1}
           </div>
         ))}
       </div>

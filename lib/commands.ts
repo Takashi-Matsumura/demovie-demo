@@ -2,11 +2,14 @@ import { z } from "zod";
 import { BACKGROUND_IDS, documentSchema, type DemoDocument } from "./document";
 import {
   addZoom,
+  canExclude,
   clipSpans,
   deleteClip,
+  isIncluded,
   locate,
   moveClip,
   removeZoom,
+  setClipIncluded,
   setStepText,
   splitAt,
   stepSpans,
@@ -21,6 +24,8 @@ const step = z.number().int().min(1);
 const commandSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("set_step_text"), step, text: z.string() }),
   z.object({ type: z.literal("delete_step"), step }),
+  z.object({ type: z.literal("exclude_step"), step }),
+  z.object({ type: z.literal("include_step"), step }),
   z.object({ type: z.literal("move_step"), step, to: step }),
   z.object({ type: z.literal("split_here") }),
   z.object({ type: z.literal("add_zoom") }),
@@ -57,11 +62,12 @@ export function describeState(doc: DemoDocument, timeSec: number) {
   const zooms = zoomSpans(doc);
   return {
     purpose: doc.purpose,
-    playheadStep: locate(doc, timeSec).index + 1,
+    playheadStep: locate(doc, timeSec).step + 1,
     background: doc.look.background,
-    steps: stepSpans(doc).map(({ clip, caption, startSec, endSec }, index) => ({
+    steps: stepSpans(doc).map(({ clip, caption, durationSec, included }, index) => ({
       step: index + 1,
-      seconds: Math.round((endSec - startSec) * 10) / 10,
+      seconds: Math.round(durationSec * 10) / 10,
+      included,
       text: caption?.text ?? "",
       zoomDepth: zooms.find((item) => item.zoom.clipId === clip.id)?.zoom.depth ?? null,
     })),
@@ -113,11 +119,32 @@ export function applyCommands(
           done.push(`手順 ${command.step} の説明文を変更しました。`);
           break;
         case "delete_step": {
-          if (next.clips.length < 2) throw new CommandError("最後の手順は削除できません。");
-          next = deleteClip(next, clipOf(command.step));
+          const clipId = clipOf(command.step);
+          const deleted = deleteClip(next, clipId);
+          if (deleted === next) {
+            throw new CommandError("動画に含める手順が 1 つは必要なので、削除できません。");
+          }
+          next = deleted;
           done.push(`手順 ${command.step} を映像ごと削除しました。`);
           break;
         }
+        case "exclude_step": {
+          const clipId = clipOf(command.step);
+          if (!canExclude(next, clipId)) {
+            throw new CommandError(
+              next.clips.some((clip) => clip.id === clipId && !isIncluded(clip))
+                ? `手順 ${command.step} はすでに動画に含めていません。`
+                : "動画に含める手順が 1 つは必要なので、含めないようにはできません。",
+            );
+          }
+          next = setClipIncluded(next, clipId, false);
+          done.push(`手順 ${command.step} を動画に含めないようにしました。`);
+          break;
+        }
+        case "include_step":
+          next = setClipIncluded(next, clipOf(command.step), true);
+          done.push(`手順 ${command.step} を動画に含めるようにしました。`);
+          break;
         case "move_step": {
           const clipId = clipOf(command.step);
           const target = Math.min(command.to, next.clips.length) - 1;
@@ -168,10 +195,17 @@ export function applyCommands(
           done.push(`手順 ${command.step} のズームを ${depth.toFixed(1)} 倍にしました。`);
           break;
         }
-        case "seek_step":
-          seekClipId = clipOf(command.step);
+        case "seek_step": {
+          const clipId = clipOf(command.step);
+          if (!next.clips.some((clip) => clip.id === clipId && isIncluded(clip))) {
+            throw new CommandError(
+              `手順 ${command.step} は動画に含めていないので、移動できません。`,
+            );
+          }
+          seekClipId = clipId;
           done.push(`手順 ${command.step} へ移動しました。`);
           break;
+        }
         case "set_background":
           next = { ...next, look: { ...next.look, background: command.background } };
           done.push("背景を変更しました。");
