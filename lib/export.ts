@@ -8,8 +8,20 @@ const FPS = 30;
 const LAST_FRAME_MARGIN_SEC = 0.01;
 const FRAME_SEC = 1 / FPS;
 
+/** 書き出す動画に入れる音。両方 false なら音声なしで書き出す。 */
+export type ExportAudio = { narration: boolean; original: boolean };
+
+// 書き出しの設定の初期値。右パネルのナレーション設定に合わせる。
+export function defaultExportAudio(doc: DemoDocument): ExportAudio {
+  return {
+    narration: doc.narration.enabled,
+    original: !doc.narration.enabled || doc.narration.keepOriginalAudio,
+  };
+}
+
 type ExportOptions = {
   doc: DemoDocument;
+  audio: ExportAudio;
   glossary: string;
   src: string;
   signal: AbortSignal;
@@ -64,7 +76,20 @@ function holdLastFrame(voiceEnded: Promise<void>, signal: AbortSignal, draw: () 
 }
 
 // 動画を実際に再生しながら Canvas を録画するので、書き出しには動画と同じ時間がかかる。
-export async function exportVideo({ doc, glossary, src, signal, onProgress }: ExportOptions) {
+export async function exportVideo({
+  doc: edited,
+  audio,
+  glossary,
+  src,
+  signal,
+  onProgress,
+}: ExportOptions) {
+  // ナレーションを入れないときは、読み上げもクレジットの表示も、ナレーションが無いものとして扱う。
+  const doc = audio.narration
+    ? edited
+    : { ...edited, narration: { ...edited.narration, enabled: false } };
+  const withAudio = audio.narration || audio.original;
+
   const canvas = document.createElement("canvas");
   canvas.width = OUTPUT_WIDTH;
   canvas.height = OUTPUT_HEIGHT;
@@ -73,24 +98,29 @@ export async function exportVideo({ doc, glossary, src, signal, onProgress }: Ex
 
   const video = document.createElement("video");
   video.playsInline = true;
+  // 音声なしのときは音の経路を作らないので、スピーカーへ出ないよう消音しておく。
+  video.muted = !withAudio;
   const loaded = waitForEvent(video, "loadeddata");
   video.src = src;
   await loaded;
 
-  const audioContext = new AudioContext();
-  await resumeAudio(audioContext);
-  const audioOutput = audioContext.createMediaStreamDestination();
-  const narration = await prepareNarration(doc, audioContext, glossary, signal);
-  // 接続しないと動画の音がスピーカーへ出るので、消すときは音量 0 を通す。
-  const originalGain = audioContext.createGain();
-  originalGain.gain.value = doc.narration.enabled && !doc.narration.keepOriginalAudio ? 0 : 1;
-  audioContext.createMediaElementSource(video).connect(originalGain).connect(audioOutput);
+  const audioContext = withAudio ? new AudioContext() : null;
+  const audioOutput = audioContext?.createMediaStreamDestination() ?? null;
+  let narration = new Map<string, AudioBuffer>();
+  if (audioContext && audioOutput) {
+    await resumeAudio(audioContext);
+    narration = await prepareNarration(doc, audioContext, glossary, signal);
+    // 接続しないと動画の音がスピーカーへ出るので、消すときは音量 0 を通す。
+    const originalGain = audioContext.createGain();
+    originalGain.gain.value = audio.original ? 1 : 0;
+    audioContext.createMediaElementSource(video).connect(originalGain).connect(audioOutput);
+  }
 
   const stream = new MediaStream([
     ...canvas.captureStream(FPS).getVideoTracks(),
-    ...audioOutput.stream.getAudioTracks(),
+    ...(audioOutput?.stream.getAudioTracks() ?? []),
   ]);
-  const mimeType = pickMimeType();
+  const mimeType = pickMimeType({ audio: withAudio });
   const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 12_000_000 });
   const chunks: Blob[] = [];
   recorder.addEventListener("dataavailable", (event) => chunks.push(event.data));
@@ -109,7 +139,11 @@ export async function exportVideo({ doc, glossary, src, signal, onProgress }: Ex
       else recorder.resume();
 
       await video.play();
-      const voiceEnded = playVoice(audioContext, narration.get(clip.id), audioOutput);
+      const voice = narration.get(clip.id);
+      const voiceEnded =
+        audioContext && audioOutput && voice
+          ? playVoice(audioContext, voice, audioOutput)
+          : Promise.resolve();
       await new Promise<void>((resolve, reject) => {
         const tick = () => {
           if (signal.aborted) {
@@ -144,7 +178,7 @@ export async function exportVideo({ doc, glossary, src, signal, onProgress }: Ex
     video.pause();
     if (recorder.state !== "inactive") recorder.stop();
     stream.getTracks().forEach((track) => track.stop());
-    await audioContext.close();
+    await audioContext?.close();
     video.removeAttribute("src");
     video.load();
   }

@@ -5,9 +5,18 @@ const MIME_CANDIDATES = [
   "video/webm",
 ];
 
+// 音声を入れないときは、音声の形式を指定しない候補を使う。
+const SILENT_MIME_CANDIDATES = [
+  "video/mp4;codecs=avc1.640028",
+  "video/mp4",
+  "video/webm;codecs=vp9",
+  "video/webm",
+];
+
 // MP4 を優先する。MediaRecorder の WebM は長さの情報を持たず、シークも遅い。
-export function pickMimeType() {
-  const mimeType = MIME_CANDIDATES.find((type) => MediaRecorder.isTypeSupported(type));
+export function pickMimeType({ audio = true }: { audio?: boolean } = {}) {
+  const candidates = audio ? MIME_CANDIDATES : SILENT_MIME_CANDIDATES;
+  const mimeType = candidates.find((type) => MediaRecorder.isTypeSupported(type));
   if (!mimeType) throw new Error("このブラウザは動画の記録に対応していません。");
   return mimeType;
 }
