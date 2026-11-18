@@ -13,7 +13,7 @@ export type VoicePlayback = {
   stop: () => void;
 };
 
-// ナレーション付きの再生で、手順に入ったら説明文を、カテゴリ画面に入ったらその文を読み上げる。
+// ナレーション付きの再生で、手順に入ったら説明文を、チャプター画面に入ったらその文を読み上げる。
 export function useVoicePlayback(
   doc: DemoDocument,
   glossary: string,

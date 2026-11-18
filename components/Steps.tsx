@@ -125,7 +125,7 @@ export function Steps({
                 )}
                 {!clip.chapter && (
                   <IconButton
-                    label={`手順 ${index + 1} の前にカテゴリ画面を入れる`}
+                    label={`手順 ${index + 1} の前にチャプター画面を入れる`}
                     tone="quiet"
                     size="sm"
                     onClick={() => {
@@ -225,7 +225,7 @@ type ChapterEditorProps = {
   onChange: (chapter: Chapter | null) => void;
 };
 
-// 手順の前に差し込むカテゴリ画面の中身。手順のカードの上に見出しとして置く。
+// 手順の前に差し込むチャプター画面の中身。手順のカードの上に見出しとして置く。
 function ChapterEditor({ number, chapter, onFocus, onChange }: ChapterEditorProps) {
   const options = CHAPTER_SEC_OPTIONS.includes(chapter.durationSec)
     ? CHAPTER_SEC_OPTIONS
@@ -234,9 +234,9 @@ function ChapterEditor({ number, chapter, onFocus, onChange }: ChapterEditorProp
     <div className="mb-1 flex flex-col gap-1.5 rounded border-l-4 border-accent bg-zoom/40 p-2">
       <div className="flex items-center gap-1.5">
         <ChapterIcon className="size-3.5 text-accent" />
-        <span className="mr-auto text-xs font-semibold">カテゴリ画面</span>
+        <span className="mr-auto text-xs font-semibold">チャプター画面</span>
         <select
-          aria-label={`手順 ${number} の前のカテゴリ画面の表示時間`}
+          aria-label={`手順 ${number} の前のチャプター画面の表示時間`}
           className="rounded bg-paper-2 px-1 py-0.5 text-xs"
           value={chapter.durationSec}
           onFocus={onFocus}
@@ -249,7 +249,7 @@ function ChapterEditor({ number, chapter, onFocus, onChange }: ChapterEditorProp
           ))}
         </select>
         <IconButton
-          label={`手順 ${number} の前のカテゴリ画面を外す`}
+          label={`手順 ${number} の前のチャプター画面を外す`}
           align="end"
           tone="quiet"
           size="sm"
@@ -259,15 +259,15 @@ function ChapterEditor({ number, chapter, onFocus, onChange }: ChapterEditorProp
         </IconButton>
       </div>
       <input
-        aria-label={`手順 ${number} の前のカテゴリ名`}
+        aria-label={`手順 ${number} の前のチャプター名`}
         className="rounded bg-paper-2 px-2 py-1 text-sm font-semibold"
-        placeholder="カテゴリ名（例: 初期設定）"
+        placeholder="チャプター名（例: 初期設定）"
         value={chapter.title}
         onFocus={onFocus}
         onChange={(event) => onChange({ ...chapter, title: event.target.value })}
       />
       <input
-        aria-label={`手順 ${number} の前のカテゴリの補足`}
+        aria-label={`手順 ${number} の前のチャプターの補足`}
         className="rounded bg-paper-2 px-2 py-1 text-xs"
         placeholder="補足（任意）"
         value={chapter.note}

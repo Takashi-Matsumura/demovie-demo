@@ -75,7 +75,7 @@ function holdLastFrame(voiceEnded: Promise<void>, signal: AbortSignal, draw: () 
   });
 }
 
-// カテゴリ画面を決まった秒数だけ描き続ける。読み上げが長いときは読み終わるまで延ばす。
+// チャプター画面を決まった秒数だけ描き続ける。読み上げが長いときは読み終わるまで延ばす。
 function showFor(
   durationSec: number,
   voiceEnded: Promise<void>,

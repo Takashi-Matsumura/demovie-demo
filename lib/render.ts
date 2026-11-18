@@ -234,7 +234,7 @@ export function drawFrame(
 }
 
 /**
- * 手順の前に差し込むカテゴリ画面。映像は映さず、見た目の背景の上にカテゴリ名と補足を置く。
+ * 手順の前に差し込むチャプター画面。映像は映さず、見た目の背景の上にチャプター名と補足を置く。
  * 字幕やズームは映像の区間にだけ付くので、ここでは描かない。
  */
 export function drawChapter(ctx: CanvasRenderingContext2D, doc: DemoDocument, chapter: Chapter) {
@@ -276,7 +276,7 @@ export function drawChapter(ctx: CanvasRenderingContext2D, doc: DemoDocument, ch
     y += titleLineHeight;
   }
   if (titleLines.length) {
-    // 見出しと補足の区切り線。カテゴリの切り替わりだと一目で分かるようにする。
+    // 見出しと補足の区切り線。チャプターの切り替わりだと一目で分かるようにする。
     ctx.fillStyle = ink;
     ctx.globalAlpha = 0.35;
     ctx.fillRect(width / 2 - titleSize, y + gap / 2 - 1, titleSize * 2, 2);
@@ -295,7 +295,7 @@ export function drawChapter(ctx: CanvasRenderingContext2D, doc: DemoDocument, ch
   if (credit) drawCredit(ctx, credit);
 }
 
-/** 再生位置の画面を描く。カテゴリ画面の区間ならカテゴリ画面、それ以外は映像の手順。 */
+/** 再生位置の画面を描く。チャプター画面の区間ならチャプター画面、それ以外は映像の手順。 */
 export function drawAt(
   ctx: CanvasRenderingContext2D,
   video: HTMLVideoElement,

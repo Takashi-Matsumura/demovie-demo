@@ -10,7 +10,7 @@ import type { VoicePlayback } from "./useVoicePlayback";
 const END_EPSILON_SEC = 0.02;
 // 手順の途中から再生したときは、文の頭から読むと映像とズレるので読まない。
 const VOICE_START_WINDOW_SEC = 0.5;
-// 読み上げを待つ間、カテゴリ画面の区間に留まるための小さな余白。
+// 読み上げを待つ間、チャプター画面の区間に留まるための小さな余白。
 const CHAPTER_HOLD_SEC = 0.001;
 
 export function usePlayer(
@@ -72,7 +72,7 @@ export function usePlayer(
       return;
     }
     if (timeRef.current >= totalDuration(docRef.current) - END_EPSILON_SEC) seek(0);
-    // カテゴリ画面の区間は映像を止めたまま進めるので、映像は区間が終わってから流す。
+    // チャプター画面の区間は映像を止めたまま進めるので、映像は区間が終わってから流す。
     if (locate(docRef.current, timeRef.current).inChapter) {
       updatePlaying(true);
       return;
@@ -119,7 +119,7 @@ export function usePlayer(
       const voice = voiceRef.current;
 
       if (inChapter) {
-        // カテゴリ画面は映像を止めたまま、経過時間で進める。読み上げ中は区間の終わりで待つ。
+        // チャプター画面は映像を止めたまま、経過時間で進める。読み上げ中は区間の終わりで待つ。
         if (!video.paused) video.pause();
         const key = voiceKey(span.clip.id, "chapter");
         if (voice.active() && spokenClipRef.current !== key) {
@@ -175,7 +175,7 @@ export function usePlayer(
         }
         timeRef.current = next.startSec;
         video.currentTime = next.clip.sourceStartSec;
-        // 次の手順がカテゴリ画面から始まるなら、映像はその区間が終わるまで流さない。
+        // 次の手順がチャプター画面から始まるなら、映像はその区間が終わるまで流さない。
         if (next.clip.chapter) video.pause();
         else if (video.paused) void video.play();
       } else {

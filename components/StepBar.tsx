@@ -245,7 +245,7 @@ function Track({
 
 type PieceKind = "chapter" | "video";
 
-// カテゴリ画面を持つ手順は、カテゴリ画面と映像の 2 つに分けて描く。
+// チャプター画面を持つ手順は、チャプター画面と映像の 2 つに分けて描く。
 function piecesOf(layout: Step[]) {
   return layout.flatMap((step) => {
     const videoStartSec = step.layoutStartSec + step.chapterSec;
@@ -279,12 +279,12 @@ type SegmentProps = {
 
 function Segment({ step, kind, number, left, width, played, selected, detail }: SegmentProps) {
   const chapter = kind === "chapter";
-  const title = step.clip.chapter?.title.trim() || "カテゴリ画面";
+  const title = step.clip.chapter?.title.trim() || "チャプター画面";
   const text = chapter ? title : step.caption?.text.trim();
   const label = chapter
-    ? `手順 ${number} の前のカテゴリ画面: ${title}`
+    ? `手順 ${number} の前のチャプター画面: ${title}`
     : `手順 ${number}${step.included ? "" : "（含めない）"}${text ? `: ${text}` : ""}`;
-  // カテゴリ画面は映像の手順と見分けられるよう、色を変えて左端に太い線を引く。
+  // チャプター画面は映像の手順と見分けられるよう、色を変えて左端に太い線を引く。
   const fill = chapter ? "bg-zoom" : "bg-paper-3";
 
   if (!detail) {

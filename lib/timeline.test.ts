@@ -565,7 +565,7 @@ describe("zoomWindow", () => {
 });
 
 describe("chapter screens", () => {
-  // 3 秒ずつの 3 手順で、2 番目の前に 2 秒のカテゴリ画面を入れる。
+  // 3 秒ずつの 3 手順で、2 番目の前に 2 秒のチャプター画面を入れる。
   function withChapter() {
     const doc = splitAt(splitAt(makeDoc(), 3), 6);
     return setChapter(doc, doc.clips[1].id, { title: "保存", note: "", durationSec: 2 });

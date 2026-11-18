@@ -12,7 +12,7 @@ import {
 // クリップは常に隙間なく連続するので、タイムライン時刻はクリップ長の累積で決まる。
 // 動画に含めないクリップはタイムラインに載せない。再生も書き出しもタイムラインをたどるので、
 // ここで外せば仕上がりから消える。手順の一覧と手順番号だけは、含めないクリップも数える。
-// カテゴリ画面を持つクリップは、映像の前にその秒数だけカテゴリ画面の区間がある。
+// チャプター画面を持つクリップは、映像の前にその秒数だけチャプター画面の区間がある。
 
 const MIN_ZOOM_SEC = 0.3;
 const DEFAULT_ZOOM_SEC = 2;
@@ -22,12 +22,12 @@ const MIN_CLIP_SEC = 0.05;
 const RAMP_SEC = 0.4;
 const BLUR_MARGIN_SEC = 1 / 30;
 
-/** startSec はカテゴリ画面を含めた始まり、videoStartSec は映像の始まり。 */
+/** startSec はチャプター画面を含めた始まり、videoStartSec は映像の始まり。 */
 export type ClipSpan = { clip: Clip; startSec: number; videoStartSec: number; endSec: number };
 
 /**
  * index はタイムライン上の順番、step は含めない手順も数えた手順番号の添字。
- * inChapter はカテゴリ画面の区間にいること。そのとき sourceSec は映像の始まりを指す。
+ * inChapter はチャプター画面の区間にいること。そのとき sourceSec は映像の始まりを指す。
  */
 export type Location = {
   clip: Clip;
@@ -136,7 +136,7 @@ function splitSource(doc: DemoDocument, clip: Clip, sourceSec: number): DemoDocu
     return doc;
   }
   const head: Clip = { ...clip, sourceEndSec: sourceSec };
-  // カテゴリ画面は区切りの始まりに付くものなので、前半に残す。
+  // チャプター画面は区切りの始まりに付くものなので、前半に残す。
   const tail: Clip = { ...clip, id: newId(), sourceStartSec: sourceSec };
   delete tail.chapter;
   const clips = doc.clips.flatMap((item) => (item.id === clip.id ? [head, tail] : [item]));
@@ -182,7 +182,7 @@ function firstCaption(doc: DemoDocument, clip: Clip) {
 
 // ステップはクリップそのもの。削除や並べ替えは映像ごと動くようクリップの操作をそのまま使う。
 // 含めない手順はタイムライン上の長さが 0 で、startSec は含めたときに入る位置を指す。
-// durationSec は映像の長さ、chapterSec はその前のカテゴリ画面の長さ。
+// durationSec は映像の長さ、chapterSec はその前のチャプター画面の長さ。
 export function stepSpans(doc: DemoDocument) {
   let cursor = 0;
   return doc.clips.map((clip) => {
@@ -196,7 +196,7 @@ export function stepSpans(doc: DemoDocument) {
   });
 }
 
-// 手順の前のカテゴリ画面を付け替える。null で外す。
+// 手順の前のチャプター画面を付け替える。null で外す。
 export function setChapter(doc: DemoDocument, clipId: string, chapter: Chapter | null): DemoDocument {
   return {
     ...doc,

@@ -68,12 +68,12 @@ export function narratedSteps(doc: DemoDocument) {
 
 export type VoicePart = "chapter" | "step";
 
-/** 読み上げ音声の置き場所の名前。同じ手順でも、カテゴリ画面と説明文は別に持つ。 */
+/** 読み上げ音声の置き場所の名前。同じ手順でも、チャプター画面と説明文は別に持つ。 */
 export function voiceKey(clipId: string, part: VoicePart) {
   return part === "step" ? clipId : `${clipId}#chapter`;
 }
 
-// カテゴリ画面はカテゴリ名と補足を続けて読む。
+// チャプター画面はチャプター名と補足を続けて読む。
 export function chapterText(chapter: { title: string; note: string } | undefined) {
   if (!chapter) return "";
   return [chapter.title.trim(), chapter.note.trim()].filter(Boolean).join("。");

@@ -215,7 +215,7 @@ export const TrashIcon = (p: IconProps) => (
     <path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" />
   </Svg>
 );
-// カテゴリ画面（見出し）を差し込む。
+// チャプター画面（見出し）を差し込む。
 export const ChapterIcon = (p: IconProps) => (
   <Svg {...p}>
     <rect x="3" y="4" width="18" height="7" rx="1.5" />

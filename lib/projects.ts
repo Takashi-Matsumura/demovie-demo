@@ -52,7 +52,7 @@ function summaryOf({ id, updatedAt, doc }: ProjectRecord): ProjectSummary {
     id,
     updatedAt,
     name: doc.asset.name,
-    // 一覧には仕上がりの長さを出す。動画に含めない手順は数えず、カテゴリ画面は数える。
+    // 一覧には仕上がりの長さを出す。動画に含めない手順は数えず、チャプター画面は数える。
     durationSec: doc.clips
       .filter((clip) => !clip.hidden)
       .reduce(

@@ -9,7 +9,7 @@ export const DEFAULT_CHAPTER_SEC = 3;
 export const MIN_CHAPTER_SEC = 1;
 export const MAX_CHAPTER_SEC = 15;
 
-// 手順の前に差し込む、カテゴリを説明する画面。その手順から始まる区切りとして手順に持たせる。
+// 手順の前に差し込むチャプター画面。チャプター名と補足を映す。その手順から始まる区切りとして手順に持たせる。
 const chapterSchema = z.object({
   title: z.string(),
   note: z.string(),
