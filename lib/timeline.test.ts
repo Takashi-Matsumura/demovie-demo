@@ -33,6 +33,7 @@ import {
   stepSpans,
   totalDuration,
   zoomAt,
+  zoomWindow,
   zoomSpans,
 } from "./timeline";
 
@@ -544,5 +545,20 @@ describe("step bar layout", () => {
     const doc = withMiddleExcluded();
     expect(pointAtLayout(doc, -1).timelineSec).toBe(0);
     expect(pointAtLayout(doc, 99)).toMatchObject({ clipId: doc.clips[2].id, timelineSec: 7 });
+  });
+});
+
+describe("zoomWindow", () => {
+  it("centers on the given point", () => {
+    expect(zoomWindow(120, 60, 30)).toEqual({ startSec: 45, endSec: 75 });
+  });
+
+  it("stays inside both ends", () => {
+    expect(zoomWindow(120, 5, 30)).toEqual({ startSec: 0, endSec: 30 });
+    expect(zoomWindow(120, 118, 30)).toEqual({ startSec: 90, endSec: 120 });
+  });
+
+  it("shows everything when it already fits", () => {
+    expect(zoomWindow(20, 10, 30)).toEqual({ startSec: 0, endSec: 20 });
   });
 });

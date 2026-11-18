@@ -202,6 +202,13 @@ export function pointAtLayout(doc: DemoDocument, layoutSec: number) {
   };
 }
 
+/** 再生バーで拡大して見せる範囲。中心を指定し、端では内側へ寄せる。全体が収まるなら全体を返す。 */
+export function zoomWindow(totalSec: number, centerSec: number, widthSec: number) {
+  if (totalSec <= widthSec) return { startSec: 0, endSec: totalSec };
+  const startSec = Math.min(Math.max(0, centerSec - widthSec / 2), totalSec - widthSec);
+  return { startSec, endSec: startSec + widthSec };
+}
+
 // 含める手順を 1 つも残さない変更はしない。タイムラインが空になると再生も書き出しもできないため。
 export function setClipIncluded(
   doc: DemoDocument,
