@@ -1,9 +1,18 @@
-import { newId, type Blur, type Caption, type Clip, type DemoDocument, type Zoom } from "./document";
+import {
+  newId,
+  type Blur,
+  type Caption,
+  type Chapter,
+  type Clip,
+  type DemoDocument,
+  type Zoom,
+} from "./document";
 
 // タイムライン時刻と素材時刻の変換はこのファイルだけが行う。
 // クリップは常に隙間なく連続するので、タイムライン時刻はクリップ長の累積で決まる。
 // 動画に含めないクリップはタイムラインに載せない。再生も書き出しもタイムラインをたどるので、
 // ここで外せば仕上がりから消える。手順の一覧と手順番号だけは、含めないクリップも数える。
+// チャプター画面を持つクリップは、映像の前にその秒数だけチャプター画面の区間がある。
 
 const MIN_ZOOM_SEC = 0.3;
 const DEFAULT_ZOOM_SEC = 2;
@@ -13,10 +22,20 @@ const MIN_CLIP_SEC = 0.05;
 const RAMP_SEC = 0.4;
 const BLUR_MARGIN_SEC = 1 / 30;
 
-export type ClipSpan = { clip: Clip; startSec: number; endSec: number };
+/** startSec はチャプター画面を含めた始まり、videoStartSec は映像の始まり。 */
+export type ClipSpan = { clip: Clip; startSec: number; videoStartSec: number; endSec: number };
 
-/** index はタイムライン上の順番、step は含めない手順も数えた手順番号の添字。 */
-export type Location = { clip: Clip; index: number; step: number; sourceSec: number };
+/**
+ * index はタイムライン上の順番、step は含めない手順も数えた手順番号の添字。
+ * inChapter はチャプター画面の区間にいること。そのとき sourceSec は映像の始まりを指す。
+ */
+export type Location = {
+  clip: Clip;
+  index: number;
+  step: number;
+  sourceSec: number;
+  inChapter: boolean;
+};
 
 export type Camera = { scale: number; centerX: number; centerY: number };
 
@@ -24,12 +43,17 @@ export function isIncluded(clip: Clip) {
   return !clip.hidden;
 }
 
+export function chapterSecOf(clip: Clip) {
+  return clip.chapter?.durationSec ?? 0;
+}
+
 export function clipSpans(doc: DemoDocument): ClipSpan[] {
   let cursor = 0;
   return doc.clips.filter(isIncluded).map((clip) => {
     const startSec = cursor;
-    cursor += clip.sourceEndSec - clip.sourceStartSec;
-    return { clip, startSec, endSec: cursor };
+    const videoStartSec = startSec + chapterSecOf(clip);
+    cursor = videoStartSec + clip.sourceEndSec - clip.sourceStartSec;
+    return { clip, startSec, videoStartSec, endSec: cursor };
   });
 }
 
@@ -44,12 +68,13 @@ export function locate(doc: DemoDocument, timelineSec: number): Location {
   const index = spans.findIndex((span) => time < span.endSec);
   const resolved = index === -1 ? spans.length - 1 : index;
   const span = spans[resolved];
-  const offset = Math.min(time - span.startSec, span.endSec - span.startSec);
+  const offset = Math.min(Math.max(0, time - span.videoStartSec), span.endSec - span.videoStartSec);
   return {
     clip: span.clip,
     index: resolved,
     step: doc.clips.indexOf(span.clip),
     sourceSec: span.clip.sourceStartSec + offset,
+    inChapter: time < span.videoStartSec,
   };
 }
 
@@ -61,7 +86,7 @@ function rangeSpans<T extends Zoom | Caption>(doc: DemoDocument, items: T[]) {
         const from = Math.max(item.sourceStartSec, span.clip.sourceStartSec);
         const to = Math.min(item.sourceEndSec, span.clip.sourceEndSec);
         if (to <= from) return [];
-        const shift = span.startSec - span.clip.sourceStartSec;
+        const shift = span.videoStartSec - span.clip.sourceStartSec;
         return [{ item, startSec: from + shift, endSec: to + shift }];
       }),
   );
@@ -111,7 +136,9 @@ function splitSource(doc: DemoDocument, clip: Clip, sourceSec: number): DemoDocu
     return doc;
   }
   const head: Clip = { ...clip, sourceEndSec: sourceSec };
+  // チャプター画面は区切りの始まりに付くものなので、前半に残す。
   const tail: Clip = { ...clip, id: newId(), sourceStartSec: sourceSec };
+  delete tail.chapter;
   const clips = doc.clips.flatMap((item) => (item.id === clip.id ? [head, tail] : [item]));
   return {
     ...doc,
@@ -155,16 +182,32 @@ function firstCaption(doc: DemoDocument, clip: Clip) {
 
 // ステップはクリップそのもの。削除や並べ替えは映像ごと動くようクリップの操作をそのまま使う。
 // 含めない手順はタイムライン上の長さが 0 で、startSec は含めたときに入る位置を指す。
+// durationSec は映像の長さ、chapterSec はその前のチャプター画面の長さ。
 export function stepSpans(doc: DemoDocument) {
   let cursor = 0;
   return doc.clips.map((clip) => {
     const durationSec = clip.sourceEndSec - clip.sourceStartSec;
+    const chapterSec = chapterSecOf(clip);
     const included = isIncluded(clip);
     const startSec = cursor;
-    if (included) cursor += durationSec;
+    if (included) cursor += chapterSec + durationSec;
     const caption = firstCaption(doc, clip);
-    return { clip, startSec, endSec: cursor, durationSec, included, caption };
+    return { clip, startSec, endSec: cursor, durationSec, chapterSec, included, caption };
   });
+}
+
+// 手順の前のチャプター画面を付け替える。null で外す。
+export function setChapter(doc: DemoDocument, clipId: string, chapter: Chapter | null): DemoDocument {
+  return {
+    ...doc,
+    clips: doc.clips.map((clip) => {
+      if (clip.id !== clipId) return clip;
+      const next: Clip = { ...clip };
+      if (chapter) next.chapter = chapter;
+      else delete next.chapter;
+      return next;
+    }),
+  };
 }
 
 // 再生バーの配置。含めない手順も長さどおりに並べ、どこを外したかが見えるようにする。
@@ -173,20 +216,25 @@ export function stepLayout(doc: DemoDocument) {
   let cursor = 0;
   return stepSpans(doc).map((step) => {
     const layoutStartSec = cursor;
-    cursor += step.durationSec;
+    cursor += step.chapterSec + step.durationSec;
     return { ...step, layoutStartSec, layoutEndSec: cursor };
   });
 }
 
 export function layoutDuration(doc: DemoDocument) {
-  return doc.clips.reduce((total, clip) => total + clip.sourceEndSec - clip.sourceStartSec, 0);
+  return doc.clips.reduce(
+    (total, clip) => total + chapterSecOf(clip) + clip.sourceEndSec - clip.sourceStartSec,
+    0,
+  );
 }
 
 /** 再生位置を、再生バー上の位置に変換する。 */
 export function layoutPosition(doc: DemoDocument, timelineSec: number) {
-  const { clip, sourceSec } = locate(doc, timelineSec);
+  const { clip } = locate(doc, timelineSec);
   const item = stepLayout(doc).find((step) => step.clip.id === clip.id);
-  return (item?.layoutStartSec ?? 0) + sourceSec - clip.sourceStartSec;
+  if (!item) return 0;
+  const offset = Math.max(0, timelineSec - item.startSec);
+  return item.layoutStartSec + Math.min(offset, item.layoutEndSec - item.layoutStartSec);
 }
 
 /** 再生バー上の位置にある手順と、そこへ移るときの再生位置。含めない手順は入る位置を返す。 */
@@ -412,7 +460,7 @@ export function captionBounds(doc: DemoDocument, captionId: string) {
   const maxSec = others
     .filter((item) => item.sourceStartSec >= caption.sourceEndSec)
     .reduce((limit, item) => Math.min(limit, item.sourceStartSec), span.clip.sourceEndSec);
-  const shift = span.startSec - span.clip.sourceStartSec;
+  const shift = span.videoStartSec - span.clip.sourceStartSec;
   return { minSec: minSec + shift, maxSec: maxSec + shift, shift };
 }
 

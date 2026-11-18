@@ -213,17 +213,18 @@ function Track({
           className="pointer-events-none absolute inset-y-0 rounded border border-ink-2/50 bg-ink/5"
         />
       )}
-      {layout
-        .filter((step) => step.layoutEndSec > shown.startSec && step.layoutStartSec < shown.endSec)
-        .map((step) => {
+      {piecesOf(layout)
+        .filter((piece) => piece.endSec > shown.startSec && piece.startSec < shown.endSec)
+        .map(({ step, kind, startSec, endSec }) => {
           // 範囲の端にかかる手順は見えている部分だけ描く。番号が範囲の外へ出て読めなくならないように。
-          const fromSec = Math.max(step.layoutStartSec, shown.startSec);
-          const toSec = Math.min(step.layoutEndSec, shown.endSec);
+          const fromSec = Math.max(startSec, shown.startSec);
+          const toSec = Math.min(endSec, shown.endSec);
           const playedSec = Math.min(Math.max(position, fromSec), toSec);
           return (
             <Segment
-              key={step.clip.id}
+              key={`${step.clip.id}-${kind}`}
               step={step}
+              kind={kind}
               number={layout.indexOf(step) + 1}
               left={percent(fromSec)}
               width={`${((toSec - fromSec) / length) * 100}%`}
@@ -242,8 +243,32 @@ function Track({
   );
 }
 
+type PieceKind = "chapter" | "video";
+
+// チャプター画面を持つ手順は、チャプター画面と映像の 2 つに分けて描く。
+function piecesOf(layout: Step[]) {
+  return layout.flatMap((step) => {
+    const videoStartSec = step.layoutStartSec + step.chapterSec;
+    const video = {
+      step,
+      kind: "video" as PieceKind,
+      startSec: videoStartSec,
+      endSec: step.layoutEndSec,
+    };
+    if (step.chapterSec === 0) return [video];
+    const chapter = {
+      step,
+      kind: "chapter" as PieceKind,
+      startSec: step.layoutStartSec,
+      endSec: videoStartSec,
+    };
+    return [chapter, video];
+  });
+}
+
 type SegmentProps = {
   step: Step;
+  kind: PieceKind;
   number: number;
   left: string;
   width: string;
@@ -252,9 +277,15 @@ type SegmentProps = {
   detail: boolean;
 };
 
-function Segment({ step, number, left, width, played, selected, detail }: SegmentProps) {
-  const text = step.caption?.text.trim();
-  const label = `手順 ${number}${step.included ? "" : "（含めない）"}${text ? `: ${text}` : ""}`;
+function Segment({ step, kind, number, left, width, played, selected, detail }: SegmentProps) {
+  const chapter = kind === "chapter";
+  const title = step.clip.chapter?.title.trim() || "チャプター画面";
+  const text = chapter ? title : step.caption?.text.trim();
+  const label = chapter
+    ? `手順 ${number} の前のチャプター画面: ${title}`
+    : `手順 ${number}${step.included ? "" : "（含めない）"}${text ? `: ${text}` : ""}`;
+  // チャプター画面は映像の手順と見分けられるよう、色を変えて左端に太い線を引く。
+  const fill = chapter ? "bg-zoom" : "bg-paper-3";
 
   if (!detail) {
     return (
@@ -265,8 +296,10 @@ function Segment({ step, number, left, width, played, selected, detail }: Segmen
           backgroundImage: step.included ? undefined : EXCLUDED_PATTERN,
         }}
         className={`absolute top-1/2 h-3 -translate-y-1/2 overflow-hidden rounded-sm border-x border-paper-2 ${
-          step.included ? (selected ? "bg-accent/25" : "bg-paper-3") : "bg-paper-2"
-        } ${selected ? "z-10 h-4 outline-2 outline-accent" : ""}`}
+          step.included ? (selected && !chapter ? "bg-accent/25" : fill) : "bg-paper-2"
+        } ${chapter ? "border-l-2 border-l-accent" : ""} ${
+          selected ? "z-10 h-4 outline-2 outline-accent" : ""
+        }`}
       >
         {step.included && (
           <div
@@ -288,13 +321,19 @@ function Segment({ step, number, left, width, played, selected, detail }: Segmen
         backgroundImage: step.included ? undefined : EXCLUDED_PATTERN,
       }}
       className={`absolute inset-y-1 flex items-center gap-1.5 overflow-hidden rounded-sm border-x border-paper-2 px-1.5 text-xs ${
-        step.included ? "bg-paper-3 text-ink" : "bg-paper-2 text-ink-2"
-      } ${selected ? "z-10 outline-2 -outline-offset-2 outline-accent" : ""}`}
+        step.included ? `${fill} text-ink` : "bg-paper-2 text-ink-2"
+      } ${chapter ? "border-l-4 border-l-accent font-semibold" : ""} ${
+        selected ? "z-10 outline-2 -outline-offset-2 outline-accent" : ""
+      }`}
     >
-      <span className={`shrink-0 font-mono ${selected ? "font-semibold text-accent" : ""}`}>
-        {number}
-      </span>
-      <span className="truncate">{step.included ? text : "含めない"}</span>
+      {chapter ? (
+        <span className="shrink-0 text-accent">■</span>
+      ) : (
+        <span className={`shrink-0 font-mono ${selected ? "font-semibold text-accent" : ""}`}>
+          {number}
+        </span>
+      )}
+      <span className="truncate">{step.included || chapter ? text : "含めない"}</span>
       {step.included && (
         <span
           aria-hidden

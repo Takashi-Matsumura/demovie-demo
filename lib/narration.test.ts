@@ -1,7 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createDocument, documentSchema } from "./document";
-import { listVoices, narratedSteps, narrationCredit, synthesize } from "./narration";
-import { setStepText, splitAt } from "./timeline";
+import {
+  listVoices,
+  narratedSteps,
+  narrationCredit,
+  narrationParts,
+  synthesize,
+  voiceKey,
+} from "./narration";
+import { setChapter, setClipIncluded, setStepText, splitAt } from "./timeline";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -23,6 +30,21 @@ describe("narratedSteps", () => {
     const base = splitAt(doc(), 3);
     const named = setStepText(base, base.clips[1].id, " 保存します ");
     expect(narratedSteps(named)).toEqual([{ clipId: base.clips[1].id, text: "保存します" }]);
+  });
+});
+
+describe("narrationParts", () => {
+  it("reads a category screen before its step and skips excluded steps", () => {
+    const base = splitAt(splitAt(doc(), 2), 4);
+    const [, second, third] = base.clips;
+    let next = setStepText(base, second.id, "保存します");
+    next = setChapter(next, second.id, { title: "保存", note: "作業を残す", durationSec: 3 });
+    next = setChapter(next, third.id, { title: "外す", note: "", durationSec: 3 });
+    next = setClipIncluded(next, third.id, false);
+    expect(narrationParts(next)).toEqual([
+      { key: voiceKey(second.id, "chapter"), text: "保存。作業を残す" },
+      { key: voiceKey(second.id, "step"), text: "保存します" },
+    ]);
   });
 });
 

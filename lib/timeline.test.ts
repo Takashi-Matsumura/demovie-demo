@@ -24,6 +24,7 @@ import {
   setBlurRange,
   setBlurStyle,
   setCaptionRange,
+  setChapter,
   setClipIncluded,
   setStepText,
   setZoomLength,
@@ -560,5 +561,65 @@ describe("zoomWindow", () => {
 
   it("shows everything when it already fits", () => {
     expect(zoomWindow(20, 10, 30)).toEqual({ startSec: 0, endSec: 20 });
+  });
+});
+
+describe("chapter screens", () => {
+  // 3 秒ずつの 3 手順で、2 番目の前に 2 秒のチャプター画面を入れる。
+  function withChapter() {
+    const doc = splitAt(splitAt(makeDoc(), 3), 6);
+    return setChapter(doc, doc.clips[1].id, { title: "保存", note: "", durationSec: 2 });
+  }
+
+  it("adds the chapter time before the step's video", () => {
+    const doc = withChapter();
+    expect(totalDuration(doc)).toBe(12);
+    expect(clipSpans(doc).map((span) => [span.startSec, span.videoStartSec, span.endSec])).toEqual([
+      [0, 0, 3],
+      [3, 5, 8],
+      [8, 8, 12],
+    ]);
+  });
+
+  it("locates the chapter screen before the video", () => {
+    const doc = withChapter();
+    expect(locate(doc, 4)).toMatchObject({ step: 1, inChapter: true, sourceSec: 3 });
+    expect(locate(doc, 6)).toMatchObject({ step: 1, inChapter: false, sourceSec: 4 });
+  });
+
+  it("keeps captions and zooms on the video, after the chapter", () => {
+    const base = withChapter();
+    const clipId = base.clips[1].id;
+    const doc = setStepText(base, clipId, "保存します");
+    expect(captionAt(doc, 4)).toBeUndefined();
+    expect(captionAt(doc, 6)?.caption.text).toBe("保存します");
+    expect(captionSpans(doc)[0]).toMatchObject({ startSec: 5, endSec: 8 });
+  });
+
+  it("leaves the chapter on the first half when the step is split", () => {
+    const doc = splitAt(withChapter(), 6.5);
+    expect(doc.clips.map((clip) => clip.chapter?.title ?? null)).toEqual([
+      null,
+      "保存",
+      null,
+      null,
+    ]);
+  });
+
+  it("moves, hides and removes the chapter with its step", () => {
+    const base = withChapter();
+    const clipId = base.clips[1].id;
+    expect(moveClip(base, clipId, 1).clips[2].chapter?.title).toBe("保存");
+    expect(totalDuration(setClipIncluded(base, clipId, false))).toBe(7);
+    expect(totalDuration(setChapter(base, clipId, null))).toBe(10);
+    expect(setChapter(base, clipId, null).clips[1]).not.toHaveProperty("chapter");
+  });
+
+  it("lays out the chapter on the step bar", () => {
+    const doc = withChapter();
+    expect(layoutDuration(doc)).toBe(12);
+    expect(stepLayout(doc)[1]).toMatchObject({ layoutStartSec: 3, layoutEndSec: 8, chapterSec: 2 });
+    expect(layoutPosition(doc, 4)).toBe(4);
+    expect(pointAtLayout(doc, 4)).toMatchObject({ clipId: doc.clips[1].id, timelineSec: 4 });
   });
 });

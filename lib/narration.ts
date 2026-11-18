@@ -66,6 +66,33 @@ export function narratedSteps(doc: DemoDocument) {
   });
 }
 
+export type VoicePart = "chapter" | "step";
+
+/** 読み上げ音声の置き場所の名前。同じ手順でも、チャプター画面と説明文は別に持つ。 */
+export function voiceKey(clipId: string, part: VoicePart) {
+  return part === "step" ? clipId : `${clipId}#chapter`;
+}
+
+// チャプター画面はチャプター名と補足を続けて読む。
+export function chapterText(chapter: { title: string; note: string } | undefined) {
+  if (!chapter) return "";
+  return [chapter.title.trim(), chapter.note.trim()].filter(Boolean).join("。");
+}
+
+/** 読み上げる全文を、再生する順に並べる。動画に含めない手順は読まない。 */
+export function narrationParts(doc: DemoDocument) {
+  const steps = new Map(narratedSteps(doc).map(({ clipId, text }) => [clipId, text]));
+  return doc.clips.flatMap((clip) => {
+    if (clip.hidden) return [];
+    const parts: { key: string; text: string }[] = [];
+    const chapter = chapterText(clip.chapter);
+    if (chapter) parts.push({ key: voiceKey(clip.id, "chapter"), text: chapter });
+    const step = steps.get(clip.id);
+    if (step) parts.push({ key: voiceKey(clip.id, "step"), text: step });
+    return parts;
+  });
+}
+
 // decodeAudioData は渡したバッファを手放すので、キャッシュが壊れないよう複製を渡す。
 export async function prepareNarration(
   doc: DemoDocument,
@@ -76,10 +103,10 @@ export async function prepareNarration(
   const buffers = new Map<string, AudioBuffer>();
   if (!doc.narration.enabled) return buffers;
   const { voiceId, speed } = doc.narration;
-  for (const { clipId, text } of narratedSteps(doc)) {
+  for (const { key, text } of narrationParts(doc)) {
     signal.throwIfAborted();
     const audio = await synthesize(applyReadings(text, glossary), voiceId, speed, signal);
-    buffers.set(clipId, await context.decodeAudioData(audio.slice(0)));
+    buffers.set(key, await context.decodeAudioData(audio.slice(0)));
   }
   return buffers;
 }

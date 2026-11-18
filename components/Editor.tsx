@@ -46,6 +46,7 @@ import {
   setBlurRange,
   setBlurStyle,
   setCaptionRange,
+  setChapter,
   setClipIncluded,
   setStepText,
   stepSpans,
@@ -664,6 +665,7 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
           onText={(clipId, text) => edit((current) => setStepText(current, clipId, text))}
           onSpeak={(text) => void speak(doc, text, glossary)}
           onMove={(clipId, delta) => edit((current) => moveClip(current, clipId, delta))}
+          onChapter={(clipId, chapter) => edit((current) => setChapter(current, clipId, chapter))}
           onInclude={(clipId, included) =>
             edit((current) => setClipIncluded(current, clipId, included))
           }

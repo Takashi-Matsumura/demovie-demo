@@ -1,6 +1,6 @@
-import type { DemoDocument } from "./document";
+import type { Chapter, DemoDocument } from "./document";
 import { narrationCredit } from "./narration";
-import { blursAt, cameraAt, captionTextAt } from "./timeline";
+import { blursAt, cameraAt, captionTextAt, locate } from "./timeline";
 
 export const OUTPUT_WIDTH = 1920;
 export const OUTPUT_HEIGHT = 1080;
@@ -231,6 +231,80 @@ export function drawFrame(
   // 音声の利用条件でクレジットが必須なので、書き忘れないよう動画に入れる。
   const credit = narrationCredit(doc);
   if (credit) drawCredit(ctx, credit);
+}
+
+/**
+ * 手順の前に差し込むチャプター画面。映像は映さず、見た目の背景の上にチャプター名と補足を置く。
+ * 字幕やズームは映像の区間にだけ付くので、ここでは描かない。
+ */
+export function drawChapter(ctx: CanvasRenderingContext2D, doc: DemoDocument, chapter: Chapter) {
+  const { width, height } = ctx.canvas;
+  const palette = BACKGROUNDS[doc.look.background];
+  const gradient = ctx.createLinearGradient(0, 0, width, height);
+  gradient.addColorStop(0, palette.from);
+  gradient.addColorStop(1, palette.to);
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, width, height);
+
+  // 明るい背景（紙）だけは文字を暗くして読めるようにする。
+  const light = doc.look.background === "paper";
+  const ink = light ? "#1f1b16" : "#ffffff";
+  const sub = light ? "rgba(31, 27, 22, 0.7)" : "rgba(255, 255, 255, 0.75)";
+  const titleSize = width * 0.045;
+  const noteSize = width * 0.022;
+  const maxWidth = width * 0.7;
+
+  ctx.save();
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.font = `700 ${titleSize}px system-ui, "Hiragino Sans", sans-serif`;
+  const titleLines = chapter.title.trim() ? wrapText(ctx, chapter.title.trim(), maxWidth) : [];
+  ctx.font = `500 ${noteSize}px system-ui, "Hiragino Sans", sans-serif`;
+  const noteLines = chapter.note.trim() ? wrapText(ctx, chapter.note.trim(), maxWidth) : [];
+
+  const titleLineHeight = titleSize * 1.3;
+  const noteLineHeight = noteSize * 1.6;
+  const gap = titleLines.length && noteLines.length ? titleSize * 0.8 : 0;
+  const blockHeight =
+    titleLines.length * titleLineHeight + gap + noteLines.length * noteLineHeight;
+  let y = (height - blockHeight) / 2;
+
+  ctx.fillStyle = ink;
+  ctx.font = `700 ${titleSize}px system-ui, "Hiragino Sans", sans-serif`;
+  for (const line of titleLines) {
+    ctx.fillText(line, width / 2, y + titleLineHeight / 2);
+    y += titleLineHeight;
+  }
+  if (titleLines.length) {
+    // 見出しと補足の区切り線。チャプターの切り替わりだと一目で分かるようにする。
+    ctx.fillStyle = ink;
+    ctx.globalAlpha = 0.35;
+    ctx.fillRect(width / 2 - titleSize, y + gap / 2 - 1, titleSize * 2, 2);
+    ctx.globalAlpha = 1;
+  }
+  y += gap;
+  ctx.fillStyle = sub;
+  ctx.font = `500 ${noteSize}px system-ui, "Hiragino Sans", sans-serif`;
+  for (const line of noteLines) {
+    ctx.fillText(line, width / 2, y + noteLineHeight / 2);
+    y += noteLineHeight;
+  }
+  ctx.restore();
+
+  const credit = narrationCredit(doc);
+  if (credit) drawCredit(ctx, credit);
+}
+
+/** 再生位置の画面を描く。チャプター画面の区間ならチャプター画面、それ以外は映像の手順。 */
+export function drawAt(
+  ctx: CanvasRenderingContext2D,
+  video: HTMLVideoElement,
+  doc: DemoDocument,
+  timelineSec: number,
+) {
+  const { clip, sourceSec, inChapter } = locate(doc, timelineSec);
+  if (inChapter && clip.chapter) drawChapter(ctx, doc, clip.chapter);
+  else drawFrame(ctx, video, doc, clip.id, sourceSec);
 }
 
 function drawCredit(ctx: CanvasRenderingContext2D, credit: string) {

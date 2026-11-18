@@ -5,6 +5,17 @@ export const SCHEMA_VERSION = 1;
 export const BACKGROUND_IDS = ["dusk", "ember", "slate", "paper"] as const;
 export const BLUR_STYLES = ["mosaic", "solid"] as const;
 
+export const DEFAULT_CHAPTER_SEC = 3;
+export const MIN_CHAPTER_SEC = 1;
+export const MAX_CHAPTER_SEC = 15;
+
+// 手順の前に差し込むチャプター画面。チャプター名と補足を映す。その手順から始まる区切りとして手順に持たせる。
+const chapterSchema = z.object({
+  title: z.string(),
+  note: z.string(),
+  durationSec: z.number().min(MIN_CHAPTER_SEC).max(MAX_CHAPTER_SEC),
+});
+
 const clipSchema = z
   .object({
     id: z.string(),
@@ -13,6 +24,8 @@ const clipSchema = z
     // 消す前に仕上がりを確かめられるよう、映像や説明文を残したまま再生と書き出しから外す。
     // この項目より前に保存した作業もそのまま読めるよう、省略できるようにしている。
     hidden: z.boolean().optional(),
+    // 省略できるので、この項目より前に保存した作業もそのまま読める。
+    chapter: chapterSchema.optional(),
   })
   .refine((clip) => clip.sourceEndSec > clip.sourceStartSec);
 
@@ -105,6 +118,7 @@ export const documentSchema = z.object({
 
 export type DemoDocument = z.infer<typeof documentSchema>;
 export type Clip = z.infer<typeof clipSchema>;
+export type Chapter = z.infer<typeof chapterSchema>;
 export type Zoom = z.infer<typeof zoomSchema>;
 export type Caption = z.infer<typeof captionSchema>;
 export type Blur = z.infer<typeof blurSchema>;
