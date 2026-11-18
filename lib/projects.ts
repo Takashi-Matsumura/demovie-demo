@@ -52,10 +52,10 @@ function summaryOf({ id, updatedAt, doc }: ProjectRecord): ProjectSummary {
     id,
     updatedAt,
     name: doc.asset.name,
-    durationSec: doc.clips.reduce(
-      (total, clip) => total + clip.sourceEndSec - clip.sourceStartSec,
-      0,
-    ),
+    // 一覧には仕上がりの長さを出す。動画に含めない手順は数えない。
+    durationSec: doc.clips
+      .filter((clip) => !clip.hidden)
+      .reduce((total, clip) => total + clip.sourceEndSec - clip.sourceStartSec, 0),
     stepCount: doc.clips.length,
   };
 }

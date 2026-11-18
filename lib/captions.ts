@@ -1,6 +1,7 @@
 import { newId, type Caption, type Clip, type DemoDocument, type Zoom } from "./document";
 import { formatGlossary } from "./glossary";
 import { seekTo, waitForEvent } from "./media";
+import { isIncluded } from "./timeline";
 
 // 手元の llama-server を直接呼ぶ。動画のフレームはこの PC の外へは出ない。
 export const VISION_URL = process.env.NEXT_PUBLIC_VISION_URL ?? "http://127.0.0.1:8084";
@@ -324,9 +325,11 @@ async function scanOperations(
   signal: AbortSignal,
   onProgress?: (message: string) => void,
 ) {
+  // 動画に含めない手順は仕上がりに出ないので、解析もしない。
+  const clips = doc.clips.filter(isIncluded);
   const groups: SignatureFrame[][] = [];
-  for (const [clipIndex, clip] of doc.clips.entries()) {
-    onProgress?.(`画面の変化を解析中 ${clipIndex + 1} / ${doc.clips.length}`);
+  for (const [clipIndex, clip] of clips.entries()) {
+    onProgress?.(`画面の変化を解析中 ${clipIndex + 1} / ${clips.length}`);
     const frames: SignatureFrame[] = [];
     for (const sec of sampleTimes(clip)) {
       signal.throwIfAborted();
@@ -338,7 +341,7 @@ async function scanOperations(
   // 時計は録画全体で探す。分割後の短い手順だけでは、毎秒変わることを確かめられない。
   const ignored = tickingMask(groups);
   const found: FoundOperation[] = [];
-  doc.clips.forEach((clip, clipIndex) => {
+  clips.forEach((clip, clipIndex) => {
     const operations = findOperations(sampleChanges(groups[clipIndex], ignored));
     operations.forEach((operation, index) => {
       const next = operations[index + 1]?.beforeSec ?? clip.sourceEndSec;

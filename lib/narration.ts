@@ -60,8 +60,8 @@ export function narrationCredit(doc: DemoDocument) {
 }
 
 export function narratedSteps(doc: DemoDocument) {
-  return stepSpans(doc).flatMap(({ clip, caption }) => {
-    const text = caption?.text.trim();
+  return stepSpans(doc).flatMap(({ clip, caption, included }) => {
+    const text = included ? caption?.text.trim() : undefined;
     return text ? [{ clipId: clip.id, text }] : [];
   });
 }

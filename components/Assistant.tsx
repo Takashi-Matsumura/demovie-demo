@@ -205,11 +205,11 @@ export function Assistant({
     const dictating = modeRef.current === "dictate";
     if (reviewStageRef.current === "listening" && reviewControllerRef.current) {
       const { doc: current } = latestRef.current;
-      const { index, sourceSec } = locate(current, startSec);
+      const { step, sourceSec } = locate(current, startSec);
       const item: ReviewItem = {
         id: newId(),
         sourceSec,
-        label: `手順 ${index + 1}`,
+        label: `手順 ${step + 1}`,
         state: "listening",
         transcript: "",
         summary: "",
@@ -240,7 +240,7 @@ export function Assistant({
         setPhase("tidying");
         const narration = await tidyNarration(transcript, latestRef.current.glossary, signal);
         const { doc: current } = latestRef.current;
-        const step = locate(current, startSec).index + 1;
+        const step = locate(current, startSec).step + 1;
         const result = applyCommands(
           current,
           [{ type: "set_step_text", step, text: narration }],

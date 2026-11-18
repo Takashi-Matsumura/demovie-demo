@@ -12,6 +12,8 @@ import {
   captionBounds,
   captionSpans,
   captionTextAt,
+  canExclude,
+  clipSpans,
   deleteClip,
   locate,
   moveClip,
@@ -19,6 +21,7 @@ import {
   setBlurRange,
   setBlurStyle,
   setCaptionRange,
+  setClipIncluded,
   setStepText,
   setZoomLength,
   splitAt,
@@ -402,5 +405,91 @@ describe("camera", () => {
     expect(cameraAt(doc, clipId, 2).scale).toBe(1);
     expect(cameraAt(doc, clipId, 3).scale).toBeCloseTo(depth);
     expect(cameraAt(doc, clipId, 4).scale).toBe(1);
+  });
+});
+
+describe("excluded steps", () => {
+  function threeSteps() {
+    return splitAt(splitAt(makeDoc(), 3), 6);
+  }
+
+  it("drops an excluded step from the timeline but keeps it in the step list", () => {
+    const base = threeSteps();
+    const doc = setClipIncluded(base, base.clips[1].id, false);
+    expect(totalDuration(doc)).toBe(7);
+    expect(clipSpans(doc).map((span) => [span.startSec, span.endSec])).toEqual([
+      [0, 3],
+      [3, 7],
+    ]);
+    const steps = stepSpans(doc).map((step) => [
+      step.startSec,
+      step.endSec,
+      step.durationSec,
+      step.included,
+    ]);
+    expect(steps).toEqual([
+      [0, 3, 3, true],
+      [3, 3, 3, false],
+      [3, 7, 4, true],
+    ]);
+    expect(documentSchema.safeParse(doc).success).toBe(true);
+  });
+
+  it("restores the step with its caption and zoom when included again", () => {
+    const base = threeSteps();
+    const clipId = base.clips[1].id;
+    const edited = withZoom(setStepText(base, clipId, "保存"), 4).doc;
+    const hidden = setClipIncluded(edited, clipId, false);
+    expect(stepSpans(hidden)[1].caption?.text).toBe("保存");
+    expect(captionAt(hidden, 4)).toBeUndefined();
+    expect(zoomSpans(hidden)).toHaveLength(0);
+
+    const shown = setClipIncluded(hidden, clipId, true);
+    expect(shown.clips[1]).not.toHaveProperty("hidden");
+    expect(captionAt(shown, 4)?.caption.text).toBe("保存");
+    expect(zoomSpans(shown)).toHaveLength(1);
+  });
+
+  it("numbers steps across excluded ones", () => {
+    const base = threeSteps();
+    const doc = setClipIncluded(base, base.clips[1].id, false);
+    expect(locate(doc, 4)).toMatchObject({ index: 1, step: 2, clip: { id: base.clips[2].id } });
+  });
+
+  it("keeps at least one step in the video", () => {
+    const base = makeDoc();
+    const clipId = base.clips[0].id;
+    expect(canExclude(base, clipId)).toBe(false);
+    expect(setClipIncluded(base, clipId, false)).toBe(base);
+
+    const two = splitAt(base, 5);
+    const hidden = setClipIncluded(two, two.clips[0].id, false);
+    expect(setClipIncluded(hidden, two.clips[1].id, false)).toBe(hidden);
+    expect(deleteClip(hidden, two.clips[1].id)).toBe(hidden);
+    expect(deleteClip(hidden, two.clips[0].id).clips).toHaveLength(1);
+    const allHidden = { ...hidden, clips: hidden.clips.map((clip) => ({ ...clip, hidden: true })) };
+    expect(documentSchema.safeParse(allHidden).success).toBe(false);
+  });
+
+  it("keeps excluded steps excluded when a neighbor is split", () => {
+    const base = threeSteps();
+    const doc = splitAt(setClipIncluded(base, base.clips[0].id, false), 2);
+    expect(doc.clips.map((clip) => !!clip.hidden)).toEqual([true, false, false, false]);
+  });
+
+  it("keeps captions of excluded steps when AI writes new ones", () => {
+    const base = threeSteps();
+    const hiddenId = base.clips[1].id;
+    const doc = setClipIncluded(setStepText(base, hiddenId, "残す"), hiddenId, false);
+    const next = applySteps(doc, [
+      { id: newId(), clipId: base.clips[2].id, sourceStartSec: 7, sourceEndSec: 8, text: "新しい" },
+    ]);
+    const texts = stepSpans(next).map((step) => [step.included, step.caption?.text]);
+    expect(texts).toEqual([
+      [true, undefined],
+      [false, "残す"],
+      [true, undefined],
+      [true, "新しい"],
+    ]);
   });
 });
