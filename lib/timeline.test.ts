@@ -15,8 +15,11 @@ import {
   canExclude,
   clipSpans,
   deleteClip,
+  layoutDuration,
+  layoutPosition,
   locate,
   moveClip,
+  pointAtLayout,
   removeBlur,
   setBlurRange,
   setBlurStyle,
@@ -26,6 +29,7 @@ import {
   setZoomLength,
   splitAt,
   splitAtSources,
+  stepLayout,
   stepSpans,
   totalDuration,
   zoomAt,
@@ -491,5 +495,54 @@ describe("excluded steps", () => {
       [true, undefined],
       [true, "新しい"],
     ]);
+  });
+});
+
+describe("step bar layout", () => {
+  // 3 秒ずつの 3 手順で、真ん中を動画に含めない。
+  function withMiddleExcluded() {
+    const doc = splitAt(splitAt(makeDoc(), 3), 6);
+    return setClipIncluded(doc, doc.clips[1].id, false);
+  }
+
+  it("lays out every step, including excluded ones, by length", () => {
+    const doc = withMiddleExcluded();
+    expect(layoutDuration(doc)).toBe(10);
+    expect(stepLayout(doc).map((step) => [step.layoutStartSec, step.layoutEndSec])).toEqual([
+      [0, 3],
+      [3, 6],
+      [6, 10],
+    ]);
+  });
+
+  it("places the playhead past the excluded step", () => {
+    const doc = withMiddleExcluded();
+    expect(layoutPosition(doc, 1)).toBe(1);
+    expect(layoutPosition(doc, 4)).toBe(7);
+    expect(layoutPosition(doc, totalDuration(doc))).toBe(10);
+  });
+
+  it("maps a point on an included step to the playhead there", () => {
+    const doc = withMiddleExcluded();
+    expect(pointAtLayout(doc, 8)).toEqual({
+      clipId: doc.clips[2].id,
+      included: true,
+      timelineSec: 5,
+    });
+  });
+
+  it("maps a point on an excluded step to where it would be inserted", () => {
+    const doc = withMiddleExcluded();
+    expect(pointAtLayout(doc, 4.5)).toEqual({
+      clipId: doc.clips[1].id,
+      included: false,
+      timelineSec: 3,
+    });
+  });
+
+  it("clamps points outside the bar", () => {
+    const doc = withMiddleExcluded();
+    expect(pointAtLayout(doc, -1).timelineSec).toBe(0);
+    expect(pointAtLayout(doc, 99)).toMatchObject({ clipId: doc.clips[2].id, timelineSec: 7 });
   });
 });

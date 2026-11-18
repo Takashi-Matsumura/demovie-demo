@@ -167,6 +167,41 @@ export function stepSpans(doc: DemoDocument) {
   });
 }
 
+// 再生バーの配置。含めない手順も長さどおりに並べ、どこを外したかが見えるようにする。
+// layoutStartSec / layoutEndSec は全手順を並べたときの位置で、タイムライン時刻とは別物。
+export function stepLayout(doc: DemoDocument) {
+  let cursor = 0;
+  return stepSpans(doc).map((step) => {
+    const layoutStartSec = cursor;
+    cursor += step.durationSec;
+    return { ...step, layoutStartSec, layoutEndSec: cursor };
+  });
+}
+
+export function layoutDuration(doc: DemoDocument) {
+  return doc.clips.reduce((total, clip) => total + clip.sourceEndSec - clip.sourceStartSec, 0);
+}
+
+/** 再生位置を、再生バー上の位置に変換する。 */
+export function layoutPosition(doc: DemoDocument, timelineSec: number) {
+  const { clip, sourceSec } = locate(doc, timelineSec);
+  const item = stepLayout(doc).find((step) => step.clip.id === clip.id);
+  return (item?.layoutStartSec ?? 0) + sourceSec - clip.sourceStartSec;
+}
+
+/** 再生バー上の位置にある手順と、そこへ移るときの再生位置。含めない手順は入る位置を返す。 */
+export function pointAtLayout(doc: DemoDocument, layoutSec: number) {
+  const layout = stepLayout(doc);
+  const sec = Math.min(Math.max(0, layoutSec), layoutDuration(doc));
+  const item = layout.find((step) => sec < step.layoutEndSec) ?? layout[layout.length - 1];
+  const offset = item.included ? sec - item.layoutStartSec : 0;
+  return {
+    clipId: item.clip.id,
+    included: item.included,
+    timelineSec: Math.min(item.startSec + offset, totalDuration(doc)),
+  };
+}
+
 // 含める手順を 1 つも残さない変更はしない。タイムラインが空になると再生も書き出しもできないため。
 export function setClipIncluded(
   doc: DemoDocument,
