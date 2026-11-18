@@ -1,7 +1,6 @@
 "use client";
 
-import type { ServiceState } from "@/lib/services";
-import { useServices } from "./useServices";
+import type { ServiceState, ServiceStatus } from "@/lib/services";
 
 const DOT: Record<ServiceState, string> = {
   ok: "bg-[oklch(72%_0.15_150)]",
@@ -15,8 +14,8 @@ const STATE_LABEL: Record<ServiceState, string> = {
   off: "未設定",
 };
 
-export function ServiceStatusBar() {
-  const services = useServices();
+// 状態は画面側で 1 か所だけ取りに行き、使えない操作を止めるのにも使う。
+export function ServiceStatusBar({ services }: { services: ServiceStatus[] }) {
   const down = services.filter((service) => service.state === "down");
   if (services.length === 0) return null;
 

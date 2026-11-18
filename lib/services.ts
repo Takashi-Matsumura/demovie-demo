@@ -17,6 +17,11 @@ export const SERVICES: Omit<ServiceStatus, "state">[] = [
   { id: "voice", label: "読み上げ", impact: "ナレーションが使えません。" },
 ];
 
+/** 停止と分かっているときだけ使えないとする。確認が済むまでは使える前提で扱う。 */
+export function isDown(services: ServiceStatus[], id: ServiceId) {
+  return services.some((service) => service.id === id && service.state === "down");
+}
+
 const TIMEOUT_MS = 2000;
 
 async function getJson(url: string): Promise<unknown> {
