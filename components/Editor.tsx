@@ -438,6 +438,9 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
   };
   const exporting = exportState.status === "running";
   const generating = captionState.status === "running";
+  // 含めない手順を選んでいる間は、再生位置が隣の手順にあるので分けない。
+  const canSplit =
+    !exporting && !generating && !hiddenClipId && splitAt(doc, timeSec) !== doc;
   const captionActivity = captionState.status === "running" ? (captionState.activity ?? null) : null;
 
   useEffect(() => {
@@ -750,13 +753,6 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
             </span>
             <div className="ml-auto flex flex-wrap gap-1">
               <IconButton
-                label="ここで手順を分ける"
-                tone="quiet"
-                onClick={() => edit((current) => splitAt(current, timeSec))}
-              >
-                <SplitIcon />
-              </IconButton>
-              <IconButton
                 label="画面の変化で手順を分ける"
                 tone="quiet"
                 disabled={exporting || generating}
@@ -841,13 +837,22 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
                 activity={captionActivity}
                 onSeek={seek}
               />
-              <div>
+              <div className="flex gap-1">
                 <IconButton
                   label="キャプションを追加"
                   disabled={generating || caption !== null}
                   onClick={() => edit((current) => addCaption(current, timeSec))}
                 >
                   <CaptionAddIcon />
+                </IconButton>
+                {/* 再生バーの「ここで分ける」と同じ操作。微調整を開いている間はこちらで分ける。 */}
+                <IconButton
+                  label="ここで手順を分ける"
+                  hint={canSplit ? undefined : "（手順の途中に合わせると分けられます）"}
+                  disabled={!canSplit}
+                  onClick={() => edit((current) => splitAt(current, timeSec))}
+                >
+                  <SplitIcon />
                 </IconButton>
               </div>
             </>
