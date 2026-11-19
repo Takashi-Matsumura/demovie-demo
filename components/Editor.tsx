@@ -648,7 +648,6 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
         </IconButton>
       </header>
 
-      <ServiceStatusBar services={services} />
       {exportAudio && (
         <ExportSettings
           audio={exportAudio}
@@ -863,6 +862,7 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
         </div>
 
         <Inspector
+          services={services}
           doc={doc}
           zoom={zoom}
           caption={captionSpan && bounds && { ...captionSpan, ...bounds }}
