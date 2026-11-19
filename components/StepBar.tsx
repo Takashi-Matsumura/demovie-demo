@@ -1,6 +1,8 @@
 "use client";
 
 import { useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
+import { layoutActivity, type ActivityMark } from "@/lib/activity";
+import type { CaptionActivity } from "@/lib/captions";
 import type { DemoDocument } from "@/lib/document";
 import { formatTime } from "@/lib/format";
 import {
@@ -11,11 +13,14 @@ import {
   totalDuration,
   zoomWindow,
 } from "@/lib/timeline";
+import { ActivityLayer } from "./ActivityLayer";
 
 type StepBarProps = {
   doc: DemoDocument;
   timeSec: number;
   selectedClipId: string;
+  /** キャプションの生成中に、解析している位置。 */
+  activity?: CaptionActivity | null;
   onSeek: (timelineSec: number) => void;
   onSelectStep: (clipId: string) => void;
 };
@@ -40,7 +45,14 @@ const EXCLUDED_PATTERN =
  * 動画に含めない区間がどこにあるかを見せる。再生は含める手順だけをたどる。
  * 長い動画では手順が詰まって読めないので、再生位置の近くを拡大したバーを下に添える。
  */
-export function StepBar({ doc, timeSec, selectedClipId, onSeek, onSelectStep }: StepBarProps) {
+export function StepBar({
+  doc,
+  timeSec,
+  selectedClipId,
+  activity = null,
+  onSeek,
+  onSelectStep,
+}: StepBarProps) {
   const layout = stepLayout(doc);
   const layoutTotal = layoutDuration(doc);
   const total = totalDuration(doc);
@@ -48,12 +60,15 @@ export function StepBar({ doc, timeSec, selectedClipId, onSeek, onSelectStep }: 
   const selectedIndex = layout.findIndex((step) => step.clip.id === selectedClipId);
   const selected = layout[selectedIndex];
   const excludedCount = layout.filter((step) => !step.included).length;
+  const { marks, focusSec } = layoutActivity(doc, activity);
 
-  // 含めない手順を選んでいるときは、再生位置ではなくその手順を中心に拡大する。
+  // 生成中は解析している位置を、含めない手順を選んでいるときはその手順を、
+  // それ以外は再生位置を中心に拡大する。
   const center =
-    selected && !selected.included
+    focusSec ??
+    (selected && !selected.included
       ? (selected.layoutStartSec + selected.layoutEndSec) / 2
-      : position;
+      : position);
   const detail =
     layoutTotal > DETAIL_MIN_TOTAL_SEC ? zoomWindow(layoutTotal, center, DETAIL_SEC) : null;
 
@@ -86,6 +101,7 @@ export function StepBar({ doc, timeSec, selectedClipId, onSeek, onSelectStep }: 
         layout={layout}
         view={{ startSec: 0, endSec: layoutTotal }}
         lens={detail}
+        marks={marks}
         position={position}
         selectedClipId={selectedClipId}
         variant="overview"
@@ -108,6 +124,7 @@ export function StepBar({ doc, timeSec, selectedClipId, onSeek, onSelectStep }: 
           layout={layout}
           view={detail}
           lens={null}
+          marks={marks}
           position={position}
           selectedClipId={selectedClipId}
           variant="detail"
@@ -144,6 +161,7 @@ type TrackProps = {
   view: View;
   /** 全体バーに重ねる、拡大バーが映している範囲。 */
   lens: View | null;
+  marks: ActivityMark[];
   position: number;
   selectedClipId: string;
   variant: "overview" | "detail";
@@ -157,6 +175,7 @@ function Track({
   layout,
   view,
   lens,
+  marks,
   position,
   selectedClipId,
   variant,
@@ -234,6 +253,7 @@ function Track({
             />
           );
         })}
+      <ActivityLayer marks={marks} view={shown} detail={detail} />
       <div
         aria-hidden
         style={{ left: percent(position) }}

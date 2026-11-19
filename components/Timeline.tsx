@@ -1,14 +1,19 @@
 "use client";
 
 import { useRef, type PointerEvent } from "react";
+import { timelineActivity } from "@/lib/activity";
+import type { CaptionActivity } from "@/lib/captions";
 import type { DemoDocument } from "@/lib/document";
 import { captionSpans, clipSpans, totalDuration, zoomSpans } from "@/lib/timeline";
+import { ActivityLayer } from "./ActivityLayer";
 
 type TimelineProps = {
   doc: DemoDocument;
   timeSec: number;
   selectedZoomId: string | null;
   selectedCaptionId: string | null;
+  /** キャプションの生成中に、解析している位置。キャプションの段に重ねる。 */
+  activity?: CaptionActivity | null;
   onSeek: (timeSec: number) => void;
 };
 
@@ -17,6 +22,7 @@ export function Timeline({
   timeSec,
   selectedZoomId,
   selectedCaptionId,
+  activity = null,
   onSeek,
 }: TimelineProps) {
   const trackRef = useRef<HTMLDivElement>(null);
@@ -92,6 +98,11 @@ export function Timeline({
             {caption.text || "（本文なし）"}
           </button>
         ))}
+        <ActivityLayer
+          marks={timelineActivity(doc, activity).marks}
+          view={{ startSec: 0, endSec: total }}
+          detail
+        />
       </div>
 
       <div className="relative flex-1 overflow-hidden rounded bg-paper-2">
