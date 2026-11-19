@@ -105,6 +105,18 @@ export const ExportIcon = (p: IconProps) => (
     <path d="M5 21h14" />
   </Svg>
 );
+export const PanelLeftIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <path d="M9 4v16" />
+  </Svg>
+);
+export const PanelRightIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <path d="M15 4v16" />
+  </Svg>
+);
 export const StopIcon = (p: IconProps) => (
   <Svg {...p}>
     <rect x="6" y="6" width="12" height="12" rx="1.5" />
