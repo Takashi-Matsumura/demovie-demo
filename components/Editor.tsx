@@ -70,6 +70,8 @@ import {
   ExportIcon,
   IconButton,
   NarratedPlayIcon,
+  PanelLeftIcon,
+  PanelRightIcon,
   PauseIcon,
   PlayIcon,
   RedoIcon,
@@ -401,6 +403,8 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
   const [exportAudio, setExportAudio] = useState<ExportAudio | null>(null);
   const [captionState, setCaptionState] = useState<CaptionState>({ status: "idle" });
   const [timelineOpen, setTimelineOpen] = useState(false);
+  const [stepsOpen, setStepsOpen] = useState(true);
+  const [inspectorOpen, setInspectorOpen] = useState(true);
   const [blurring, setBlurring] = useState(false);
   const [dragBox, setDragBox] = useState<DragBox | null>(null);
   const thumbnailOf = useThumbnails(doc, source.url);
@@ -609,7 +613,7 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
   };
 
   return (
-    <main className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-3 p-4">
+    <main className="flex w-full flex-1 flex-col gap-3 p-4">
       <video ref={videoRef} src={source.url} playsInline preload="auto" className="hidden" />
 
       <header className="flex flex-wrap items-center gap-2">
@@ -636,6 +640,23 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
         >
           {saveFailed ? "保存できませんでした" : "自動保存"}
         </span>
+        <IconButton
+          label={stepsOpen ? "手順パネルを隠す" : "手順パネルを表示"}
+          aria-pressed={stepsOpen}
+          tone={stepsOpen ? "default" : "quiet"}
+          onClick={() => setStepsOpen((open) => !open)}
+        >
+          <PanelLeftIcon />
+        </IconButton>
+        <IconButton
+          label={inspectorOpen ? "設定パネルを隠す" : "設定パネルを表示"}
+          aria-pressed={inspectorOpen}
+          tone={inspectorOpen ? "default" : "quiet"}
+          onClick={() => setInspectorOpen((open) => !open)}
+        >
+          <PanelRightIcon />
+        </IconButton>
+        <span aria-hidden className="mx-1 h-5 w-px bg-rule" />
         <IconButton label="元に戻す" tone="quiet" disabled={!canUndo} onClick={undo}>
           <UndoIcon />
         </IconButton>
@@ -670,22 +691,24 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
         </p>
       )}
 
-      <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[20rem_minmax(0,1fr)] xl:grid-cols-[20rem_minmax(0,1fr)_16rem]">
-        <Steps
-          doc={doc}
-          selectedClipId={selectedClipId}
-          thumbnailOf={thumbnailOf}
-          onPurpose={(purpose) => edit((current) => ({ ...current, purpose }))}
-          onSelect={selectStep}
-          onText={(clipId, text) => edit((current) => setStepText(current, clipId, text))}
-          onSpeak={(text) => void speak(doc, text, glossary)}
-          onMove={(clipId, delta) => edit((current) => moveClip(current, clipId, delta))}
-          onChapter={(clipId, chapter) => edit((current) => setChapter(current, clipId, chapter))}
-          onInclude={(clipId, included) =>
-            edit((current) => setClipIncluded(current, clipId, included))
-          }
-          onDelete={(clipId) => edit((current) => deleteClip(current, clipId))}
-        />
+      <div className={`grid min-h-0 flex-1 gap-3 ${gridColumns(stepsOpen, inspectorOpen)}`}>
+        {stepsOpen && (
+          <Steps
+            doc={doc}
+            selectedClipId={selectedClipId}
+            thumbnailOf={thumbnailOf}
+            onPurpose={(purpose) => edit((current) => ({ ...current, purpose }))}
+            onSelect={selectStep}
+            onText={(clipId, text) => edit((current) => setStepText(current, clipId, text))}
+            onSpeak={(text) => void speak(doc, text, glossary)}
+            onMove={(clipId, delta) => edit((current) => moveClip(current, clipId, delta))}
+            onChapter={(clipId, chapter) => edit((current) => setChapter(current, clipId, chapter))}
+            onInclude={(clipId, included) =>
+              edit((current) => setClipIncluded(current, clipId, included))
+            }
+            onDelete={(clipId) => edit((current) => deleteClip(current, clipId))}
+          />
+        )}
 
         <div className="flex min-w-0 flex-col gap-3">
           {blurring && (
@@ -874,58 +897,60 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
           )}
         </div>
 
-        <Inspector
-          services={services}
-          doc={doc}
-          zoom={zoom}
-          caption={captionSpan && bounds && { ...captionSpan, ...bounds }}
-          glossary={glossary}
-          onGlossary={setGlossary}
-          onNarration={(patch) =>
-            edit((current) => ({ ...current, narration: { ...current.narration, ...patch } }))
-          }
-          onBlurScope={(blurId, scope) => {
-            const { sourceStartSec, sourceEndSec } = currentClip;
-            edit((current) =>
-              scope === "all"
-                ? setBlurRange(current, blurId, 0, current.asset.durationSec)
-                : setBlurRange(current, blurId, sourceStartSec, sourceEndSec),
-            );
-          }}
-          onBlurStyle={(blurId, style) => edit((current) => setBlurStyle(current, blurId, style))}
-          onBlurRemove={(blurId) => edit((current) => removeBlur(current, blurId))}
-          onLook={(patch) => edit((current) => ({ ...current, look: { ...current.look, ...patch } }))}
-          onZoom={(patch) => {
-            if (zoom) edit((current) => updateZoom(current, zoom.id, patch));
-          }}
-          onZoomLength={(lengthSec) => {
-            if (!zoom) return;
-            const next = setZoomLength(doc, zoom.id, lengthSec);
-            edit(() => next);
-            // 短くして再生位置が外れるとパネルごと消えるので、区間の中へ戻す。
-            const span = zoomSpans(next).find((item) => item.zoom.id === zoom.id);
-            if (span && timeSec >= span.endSec) seek((span.startSec + span.endSec) / 2);
-          }}
-          onZoomRemove={() => {
-            if (zoom) edit((current) => removeZoom(current, zoom.id));
-          }}
-          onCaptionText={(text) => {
-            if (caption) edit((current) => updateCaption(current, caption.id, text));
-          }}
-          onCaptionRange={(startSec, endSec) => {
-            if (!caption) return;
-            const next = setCaptionRange(doc, caption.id, startSec, endSec);
-            edit(() => next);
-            // 再生位置が外れるとパネルごと消えるので、区間の中へ戻す。
-            const span = captionSpans(next).find((item) => item.caption.id === caption.id);
-            if (span && (timeSec < span.startSec || timeSec >= span.endSec)) {
-              seek((span.startSec + span.endSec) / 2);
+        {inspectorOpen && (
+          <Inspector
+            services={services}
+            doc={doc}
+            zoom={zoom}
+            caption={captionSpan && bounds && { ...captionSpan, ...bounds }}
+            glossary={glossary}
+            onGlossary={setGlossary}
+            onNarration={(patch) =>
+              edit((current) => ({ ...current, narration: { ...current.narration, ...patch } }))
             }
-          }}
-          onCaptionRemove={() => {
-            if (caption) edit((current) => removeCaption(current, caption.id));
-          }}
-        />
+            onBlurScope={(blurId, scope) => {
+              const { sourceStartSec, sourceEndSec } = currentClip;
+              edit((current) =>
+                scope === "all"
+                  ? setBlurRange(current, blurId, 0, current.asset.durationSec)
+                  : setBlurRange(current, blurId, sourceStartSec, sourceEndSec),
+              );
+            }}
+            onBlurStyle={(blurId, style) => edit((current) => setBlurStyle(current, blurId, style))}
+            onBlurRemove={(blurId) => edit((current) => removeBlur(current, blurId))}
+            onLook={(patch) => edit((current) => ({ ...current, look: { ...current.look, ...patch } }))}
+            onZoom={(patch) => {
+              if (zoom) edit((current) => updateZoom(current, zoom.id, patch));
+            }}
+            onZoomLength={(lengthSec) => {
+              if (!zoom) return;
+              const next = setZoomLength(doc, zoom.id, lengthSec);
+              edit(() => next);
+              // 短くして再生位置が外れるとパネルごと消えるので、区間の中へ戻す。
+              const span = zoomSpans(next).find((item) => item.zoom.id === zoom.id);
+              if (span && timeSec >= span.endSec) seek((span.startSec + span.endSec) / 2);
+            }}
+            onZoomRemove={() => {
+              if (zoom) edit((current) => removeZoom(current, zoom.id));
+            }}
+            onCaptionText={(text) => {
+              if (caption) edit((current) => updateCaption(current, caption.id, text));
+            }}
+            onCaptionRange={(startSec, endSec) => {
+              if (!caption) return;
+              const next = setCaptionRange(doc, caption.id, startSec, endSec);
+              edit(() => next);
+              // 再生位置が外れるとパネルごと消えるので、区間の中へ戻す。
+              const span = captionSpans(next).find((item) => item.caption.id === caption.id);
+              if (span && (timeSec < span.startSec || timeSec >= span.endSec)) {
+                seek((span.startSec + span.endSec) / 2);
+              }
+            }}
+            onCaptionRemove={() => {
+              if (caption) edit((current) => removeCaption(current, caption.id));
+            }}
+          />
+        )}
       </div>
     </main>
   );
@@ -938,6 +963,16 @@ type ExportSettingsProps = {
   onCancel: () => void;
   onStart: () => void;
 };
+
+/** 両サイドのパネルの開閉に合わせた列構成。Tailwind が拾えるようにクラス名はそのまま書く。 */
+function gridColumns(stepsOpen: boolean, inspectorOpen: boolean): string {
+  if (stepsOpen && inspectorOpen) {
+    return "lg:grid-cols-[20rem_minmax(0,1fr)] xl:grid-cols-[20rem_minmax(0,1fr)_16rem]";
+  }
+  if (stepsOpen) return "lg:grid-cols-[20rem_minmax(0,1fr)]";
+  if (inspectorOpen) return "xl:grid-cols-[minmax(0,1fr)_16rem]";
+  return "grid-cols-1";
+}
 
 function ExportSettings({
   audio,
