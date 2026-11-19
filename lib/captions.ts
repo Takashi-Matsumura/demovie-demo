@@ -293,6 +293,23 @@ async function describe(before: string, after: string, prompt: string, signal: A
 }
 
 type FoundOperation = { clip: Clip; operation: Operation; endSec: number };
+
+/** キャプションを付ける区間。素材上の時刻で持つ。 */
+export type CaptionTarget = { clipId: string; sourceStartSec: number; sourceEndSec: number };
+
+/**
+ * タイムラインに重ねて見せる、いま解析している位置。
+ * scan は画面の変化を探している手順と位置、caption は見つけた区間と、何番目まで説明文を作ったか。
+ * results は作り終えた区間の説明文で、説明が付かなかった区間は null。
+ */
+export type CaptionActivity =
+  | { phase: "scan"; clipId: string; sourceSec: number; scannedClipIds: string[] }
+  | { phase: "caption"; targets: CaptionTarget[]; results: (string | null)[] };
+
+type ProgressHandlers = {
+  onProgress?: (message: string) => void;
+  onActivity?: (activity: CaptionActivity) => void;
+};
 type Analyzer = { video: HTMLVideoElement; ctx: CanvasRenderingContext2D };
 
 async function withAnalyzer<T>(src: string, run: (analyzer: Analyzer) => Promise<T>) {
@@ -323,16 +340,24 @@ async function scanOperations(
   { video, ctx }: Analyzer,
   doc: DemoDocument,
   signal: AbortSignal,
-  onProgress?: (message: string) => void,
+  { onProgress, onActivity }: ProgressHandlers,
 ) {
   // 動画に含めない手順は仕上がりに出ないので、解析もしない。
   const clips = doc.clips.filter(isIncluded);
   const groups: SignatureFrame[][] = [];
   for (const [clipIndex, clip] of clips.entries()) {
     onProgress?.(`画面の変化を解析中 ${clipIndex + 1} / ${clips.length}`);
+    const scannedClipIds = clips.slice(0, clipIndex).map((done) => done.id);
     const frames: SignatureFrame[] = [];
     for (const sec of sampleTimes(clip)) {
       signal.throwIfAborted();
+      // 最初の読み取りは手順の少し前から始まるので、手順の始まりに留める。
+      onActivity?.({
+        phase: "scan",
+        clipId: clip.id,
+        sourceSec: Math.max(sec, clip.sourceStartSec),
+        scannedClipIds,
+      });
       await seekTo(video, sec);
       frames.push({ sec, signature: signatureOf(ctx, video) });
     }
@@ -363,14 +388,13 @@ type DetectOptions = {
   doc: DemoDocument;
   src: string;
   signal: AbortSignal;
-  onProgress?: (message: string) => void;
-};
+} & ProgressHandlers;
 
 // AI を使わず、画面が変わった位置だけを返す。BIOS のようにカーソルの無い画面や、
 // 解析サーバが使えないときでも手順に分けられるようにする。
-export async function detectSplitPoints({ doc, src, signal, onProgress }: DetectOptions) {
+export async function detectSplitPoints({ doc, src, signal, ...handlers }: DetectOptions) {
   const { found } = await withAnalyzer(src, (analyzer) =>
-    scanOperations(analyzer, doc, signal, onProgress),
+    scanOperations(analyzer, doc, signal, handlers),
   );
   return splitPointsOf(found);
 }
@@ -381,6 +405,7 @@ type GenerateOptions = {
   src: string;
   signal: AbortSignal;
   onProgress: (message: string) => void;
+  onActivity?: (activity: CaptionActivity) => void;
 };
 
 // 変化のあった箇所だけ VLM に渡す。全区間を送ると 1 枚ごとに数秒かかり、静止画面の説明も増える。
@@ -390,17 +415,28 @@ export async function generateCaptions({
   src,
   signal,
   onProgress,
+  onActivity,
 }: GenerateOptions) {
   return withAnalyzer(src, async (analyzer) => {
     const { video, ctx } = analyzer;
-    const { found, ignored } = await scanOperations(analyzer, doc, signal, onProgress);
+    const { found, ignored } = await scanOperations(analyzer, doc, signal, {
+      onProgress,
+      onActivity,
+    });
     if (found.length === 0) throw new Error("画面の変化が見つかりませんでした。");
 
+    const targets: CaptionTarget[] = found.map(({ clip, operation, endSec }) => ({
+      clipId: clip.id,
+      sourceStartSec: Math.max(operation.beforeSec, clip.sourceStartSec),
+      sourceEndSec: endSec,
+    }));
+    const results: (string | null)[] = [];
     const captions: Caption[] = [];
     const zooms: Zoom[] = [];
     for (const [index, { clip, operation, endSec }] of found.entries()) {
       signal.throwIfAborted();
       onProgress(`キャプションを生成中 ${index + 1} / ${found.length}`);
+      onActivity?.({ phase: "caption", targets, results: [...results] });
       await seekTo(video, operation.referenceSec ?? operation.beforeSec);
       const before = frameUrl(video);
       const beforeSignature: Uint8ClampedArray = signatureOf(ctx, video);
@@ -413,8 +449,10 @@ export async function generateCaptions({
         ignored,
       );
       const text = await describe(before, frameUrl(video), buildPrompt(doc.purpose, glossary), signal);
-      const sourceStartSec = Math.max(operation.beforeSec, clip.sourceStartSec);
-      if (!text || endSec <= sourceStartSec) continue;
+      const { sourceStartSec } = targets[index];
+      const kept = Boolean(text) && endSec > sourceStartSec;
+      results.push(kept ? text : null);
+      if (!kept) continue;
       captions.push({ id: newId(), clipId: clip.id, sourceStartSec, sourceEndSec: endSec, text });
       const zoom = suggestZoom(region);
       if (zoom && endSec - sourceStartSec >= MIN_AUTO_ZOOM_SEC) {

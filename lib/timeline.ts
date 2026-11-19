@@ -237,6 +237,22 @@ export function layoutPosition(doc: DemoDocument, timelineSec: number) {
   return item.layoutStartSec + Math.min(offset, item.layoutEndSec - item.layoutStartSec);
 }
 
+/** 素材上の位置を、再生バー上の位置に変換する。手順が無くなっていれば null。 */
+export function layoutOfSource(doc: DemoDocument, clipId: string, sourceSec: number) {
+  const item = stepLayout(doc).find((step) => step.clip.id === clipId);
+  if (!item) return null;
+  const offset = Math.min(Math.max(0, sourceSec - item.clip.sourceStartSec), item.durationSec);
+  return item.layoutStartSec + item.chapterSec + offset;
+}
+
+/** 素材上の位置を、タイムライン時刻に変換する。手順が無いか含めないときは null。 */
+export function timelineOfSource(doc: DemoDocument, clipId: string, sourceSec: number) {
+  const span = clipSpans(doc).find(({ clip }) => clip.id === clipId);
+  if (!span) return null;
+  const { clip, videoStartSec, endSec } = span;
+  return Math.min(Math.max(videoStartSec, videoStartSec + sourceSec - clip.sourceStartSec), endSec);
+}
+
 /** 再生バー上の位置にある手順と、そこへ移るときの再生位置。含めない手順は入る位置を返す。 */
 export function pointAtLayout(doc: DemoDocument, layoutSec: number) {
   const layout = stepLayout(doc);

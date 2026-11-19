@@ -8,7 +8,7 @@ import {
   type ChangeEvent,
   type PointerEvent,
 } from "react";
-import { detectSplitPoints, generateCaptions } from "@/lib/captions";
+import { detectSplitPoints, generateCaptions, type CaptionActivity } from "@/lib/captions";
 import { createDocument, newId, type DemoDocument } from "@/lib/document";
 import { defaultExportAudio, exportVideo, type ExportAudio } from "@/lib/export";
 import { formatTime } from "@/lib/format";
@@ -370,7 +370,7 @@ const END_MARGIN_SEC = 0.05;
 
 type CaptionState =
   | { status: "idle" }
-  | { status: "running"; message: string }
+  | { status: "running"; message: string; activity?: CaptionActivity }
   | { status: "done"; message: string }
   | { status: "failed"; message: string };
 
@@ -436,6 +436,7 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
   };
   const exporting = exportState.status === "running";
   const generating = captionState.status === "running";
+  const captionActivity = captionState.status === "running" ? (captionState.activity ?? null) : null;
 
   useEffect(() => {
     saveProject(source.projectId, doc)
@@ -544,7 +545,10 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
         glossary,
         src: source.url,
         signal: controller.signal,
-        onProgress: (message) => setCaptionState({ status: "running", message }),
+        onProgress: (message) =>
+          setCaptionState((state) => ({ ...runningOf(state), status: "running", message })),
+        onActivity: (activity) =>
+          setCaptionState((state) => ({ ...runningOf(state), status: "running", activity })),
       });
       edit((current) => applySteps(current, captions, zooms));
       setCaptionState({ status: "idle" });
@@ -571,7 +575,10 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
         doc,
         src: source.url,
         signal: controller.signal,
-        onProgress: (message) => setCaptionState({ status: "running", message }),
+        onProgress: (message) =>
+          setCaptionState((state) => ({ ...runningOf(state), status: "running", message })),
+        onActivity: (activity) =>
+          setCaptionState((state) => ({ ...runningOf(state), status: "running", activity })),
       });
       const before = doc.clips.length;
       const next = splitAtSources(doc, points);
@@ -830,6 +837,7 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
                 timeSec={timeSec}
                 selectedZoomId={zoom?.id ?? null}
                 selectedCaptionId={caption?.id ?? null}
+                activity={captionActivity}
                 onSeek={seek}
               />
               <div>
@@ -847,6 +855,7 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
               doc={doc}
               timeSec={timeSec}
               selectedClipId={selectedClipId}
+              activity={captionActivity}
               onSeek={seek}
               onSelectStep={selectStep}
             />
@@ -1026,6 +1035,11 @@ function CaptionStatus({ state }: { state: CaptionState }) {
     );
   }
   return null;
+}
+
+// 進捗の文言と位置は別々に届くので、届いていない方は直前の値を引き継ぐ。
+function runningOf(state: CaptionState) {
+  return state.status === "running" ? state : { message: "" };
 }
 
 function messageOf(cause: unknown) {
