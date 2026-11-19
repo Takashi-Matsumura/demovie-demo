@@ -13,6 +13,8 @@ import {
 import { parseGlossary } from "@/lib/glossary";
 import { listVoices, type Voice } from "@/lib/narration";
 import { BACKGROUNDS } from "@/lib/render";
+import type { ServiceStatus } from "@/lib/services";
+import { ServiceStatusBar } from "./ServiceStatus";
 
 type CaptionPanel = {
   caption: Caption;
@@ -23,6 +25,7 @@ type CaptionPanel = {
 };
 
 type InspectorProps = {
+  services: ServiceStatus[];
   doc: DemoDocument;
   zoom: Zoom | null;
   caption: CaptionPanel | null;
@@ -74,6 +77,7 @@ function Slider({ label, value, min, max, step, unit, onChange }: SliderProps) {
 }
 
 export function Inspector({
+  services,
   doc,
   zoom,
   caption,
@@ -114,6 +118,7 @@ export function Inspector({
 
   return (
     <aside className="flex flex-col gap-6 rounded-lg bg-paper-2 p-4">
+      <ServiceStatusBar services={services} stacked />
       <section className="flex flex-col gap-3">
         <h2 className="text-sm font-semibold">
           {/* details だと Space が Editor の再生ショートカットに奪われるので button にする。 */}
