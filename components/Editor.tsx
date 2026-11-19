@@ -39,7 +39,9 @@ import {
   clipSpans,
   deleteClip,
   locate,
+  mergeWithNext,
   moveClip,
+  moveClipEdge,
   removeBlur,
   removeCaption,
   removeZoom,
@@ -855,8 +857,14 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
               timeSec={timeSec}
               selectedClipId={selectedClipId}
               activity={captionActivity}
+              editable={!exporting && !generating}
               onSeek={seek}
               onSelectStep={selectStep}
+              onEdge={(clipId, edge, sourceSec) =>
+                edit((current) => moveClipEdge(current, clipId, edge, sourceSec))
+              }
+              onMerge={(clipId) => edit((current) => mergeWithNext(current, clipId))}
+              onSplit={() => edit((current) => splitAt(current, timeSec))}
             />
           )}
         </div>

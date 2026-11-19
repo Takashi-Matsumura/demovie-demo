@@ -354,6 +354,139 @@ export function applySteps(
   };
 }
 
+// 元の映像がつながっているとみなす差。保存や計算で生じる端数を吸収する。
+const SAME_SOURCE_SEC = 1e-3;
+
+export type ClipEdge = "start" | "end";
+
+function sameSource(a: number, b: number) {
+  return Math.abs(a - b) < SAME_SOURCE_SEC;
+}
+
+/** 隣の手順のうち、元の映像がその端でつながっているもの。並べ替えや削除で離れていれば null。 */
+function joinedNeighbor(doc: DemoDocument, clipId: string, edge: ClipEdge) {
+  const index = doc.clips.findIndex((clip) => clip.id === clipId);
+  const clip = doc.clips[index];
+  const other = doc.clips[edge === "start" ? index - 1 : index + 1];
+  if (!clip || !other) return null;
+  const joined =
+    edge === "start"
+      ? sameSource(other.sourceEndSec, clip.sourceStartSec)
+      : sameSource(clip.sourceEndSec, other.sourceStartSec);
+  return joined ? other : null;
+}
+
+/**
+ * 手順の端を動かせる範囲（素材時刻）。つながった隣の手順があれば境目を共有し、
+ * どちらも最短の長さを残す。つながっていない端は、ほかの手順の映像と重ならない所まで伸ばせる。
+ */
+export function clipEdgeLimits(doc: DemoDocument, clipId: string, edge: ClipEdge) {
+  const clip = doc.clips.find((item) => item.id === clipId);
+  if (!clip) return null;
+  const neighbor = joinedNeighbor(doc, clipId, edge);
+  const others = doc.clips.filter((item) => item.id !== clipId);
+  if (edge === "start") {
+    const minSec = neighbor
+      ? neighbor.sourceStartSec + MIN_CLIP_SEC
+      : Math.max(
+          0,
+          ...others
+            .filter((item) => item.sourceEndSec <= clip.sourceStartSec + SAME_SOURCE_SEC)
+            .map((item) => item.sourceEndSec),
+        );
+    return { minSec, maxSec: clip.sourceEndSec - MIN_CLIP_SEC };
+  }
+  const maxSec = neighbor
+    ? neighbor.sourceEndSec - MIN_CLIP_SEC
+    : Math.min(
+        doc.asset.durationSec,
+        ...others
+          .filter((item) => item.sourceStartSec >= clip.sourceEndSec - SAME_SOURCE_SEC)
+          .map((item) => item.sourceStartSec),
+      );
+  return { minSec: clip.sourceStartSec + MIN_CLIP_SEC, maxSec };
+}
+
+// 手順の範囲が変わったら、その中のキャプションとズームを収め直す。
+// 手順の端に揃っていたキャプションは端に付いていく。手順の説明文が手順全体を覆い続けるように。
+function refitRanges(doc: DemoDocument, before: Clip[]): DemoDocument {
+  const fit = <T extends Zoom | Caption>(item: T, follow: boolean, minSec: number): T[] => {
+    const old = before.find((clip) => clip.id === item.clipId);
+    const clip = doc.clips.find((entry) => entry.id === item.clipId);
+    if (!old || !clip) return [item];
+    let { sourceStartSec, sourceEndSec } = item;
+    if (follow && sameSource(sourceStartSec, old.sourceStartSec)) {
+      sourceStartSec = clip.sourceStartSec;
+    }
+    if (follow && sameSource(sourceEndSec, old.sourceEndSec)) sourceEndSec = clip.sourceEndSec;
+    sourceStartSec = Math.max(sourceStartSec, clip.sourceStartSec);
+    sourceEndSec = Math.min(sourceEndSec, clip.sourceEndSec);
+    if (sourceEndSec - sourceStartSec < minSec) return [];
+    return [{ ...item, sourceStartSec, sourceEndSec }];
+  };
+  return {
+    ...doc,
+    captions: doc.captions.flatMap((caption) => fit(caption, true, MIN_CLIP_SEC)),
+    zooms: doc.zooms.flatMap((zoom) => fit(zoom, false, MIN_ZOOM_SEC)),
+  };
+}
+
+/** 手順の始まりか終わりを、素材時刻の sourceSec へ動かす。 */
+export function moveClipEdge(
+  doc: DemoDocument,
+  clipId: string,
+  edge: ClipEdge,
+  sourceSec: number,
+): DemoDocument {
+  const limits = clipEdgeLimits(doc, clipId, edge);
+  const clip = doc.clips.find((item) => item.id === clipId);
+  if (!limits || !clip || limits.maxSec < limits.minSec) return doc;
+  const sec = Math.min(Math.max(sourceSec, limits.minSec), limits.maxSec);
+  if (sameSource(sec, edge === "start" ? clip.sourceStartSec : clip.sourceEndSec)) return doc;
+  const neighbor = joinedNeighbor(doc, clipId, edge);
+  const clips = doc.clips.map((item): Clip => {
+    if (item.id === clipId) {
+      return edge === "start" ? { ...item, sourceStartSec: sec } : { ...item, sourceEndSec: sec };
+    }
+    if (item.id === neighbor?.id) {
+      return edge === "start" ? { ...item, sourceEndSec: sec } : { ...item, sourceStartSec: sec };
+    }
+    return item;
+  });
+  return refitRanges({ ...doc, clips }, doc.clips);
+}
+
+/** 次の手順と結合できるか。できないときは理由を返す。 */
+export function mergeBlocker(doc: DemoDocument, clipId: string): string | null {
+  const index = doc.clips.findIndex((clip) => clip.id === clipId);
+  const next = doc.clips[index + 1];
+  if (index === -1 || !next) return "結合する隣の手順がありません。";
+  if (!joinedNeighbor(doc, clipId, "end")) {
+    return "並べ替えや削除で元の映像が続いていないため、結合できません。";
+  }
+  if (isIncluded(doc.clips[index]) !== isIncluded(next)) {
+    return "動画に含める手順と含めない手順は結合できません。";
+  }
+  return null;
+}
+
+/** 次の手順を結合する。前の手順の ID とチャプター画面を引き継ぎ、次の手順の説明文やズームは残す。 */
+export function mergeWithNext(doc: DemoDocument, clipId: string): DemoDocument {
+  if (mergeBlocker(doc, clipId)) return doc;
+  const index = doc.clips.findIndex((clip) => clip.id === clipId);
+  const next = doc.clips[index + 1];
+  const moveTo = <T extends Zoom | Caption>(item: T): T =>
+    item.clipId === next.id ? { ...item, clipId } : item;
+  return {
+    ...doc,
+    clips: doc.clips
+      .filter((clip) => clip.id !== next.id)
+      .map((clip) => (clip.id === clipId ? { ...clip, sourceEndSec: next.sourceEndSec } : clip)),
+    zooms: doc.zooms.map(moveTo),
+    captions: doc.captions.map(moveTo),
+  };
+}
+
 export function deleteClip(doc: DemoDocument, clipId: string): DemoDocument {
   // 含める手順は、ほかに含める手順が残るときだけ消せる。
   const clip = doc.clips.find((item) => item.id === clipId);
