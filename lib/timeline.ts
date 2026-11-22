@@ -1,4 +1,5 @@
 import {
+  assetOf,
   newId,
   type Blur,
   type Caption,
@@ -368,7 +369,7 @@ function joinedNeighbor(doc: DemoDocument, clipId: string, edge: ClipEdge) {
   const index = doc.clips.findIndex((clip) => clip.id === clipId);
   const clip = doc.clips[index];
   const other = doc.clips[edge === "start" ? index - 1 : index + 1];
-  if (!clip || !other) return null;
+  if (!clip || !other || clip.assetId !== other.assetId) return null;
   const joined =
     edge === "start"
       ? sameSource(other.sourceEndSec, clip.sourceStartSec)
@@ -384,7 +385,8 @@ export function clipEdgeLimits(doc: DemoDocument, clipId: string, edge: ClipEdge
   const clip = doc.clips.find((item) => item.id === clipId);
   if (!clip) return null;
   const neighbor = joinedNeighbor(doc, clipId, edge);
-  const others = doc.clips.filter((item) => item.id !== clipId);
+  // 重なりを気にするのは同じ動画の手順だけ。別の動画の素材時刻とは関係がない。
+  const others = doc.clips.filter((item) => item.id !== clipId && item.assetId === clip.assetId);
   if (edge === "start") {
     const minSec = neighbor
       ? neighbor.sourceStartSec + MIN_CLIP_SEC
@@ -399,7 +401,7 @@ export function clipEdgeLimits(doc: DemoDocument, clipId: string, edge: ClipEdge
   const maxSec = neighbor
     ? neighbor.sourceEndSec - MIN_CLIP_SEC
     : Math.min(
-        doc.asset.durationSec,
+        assetOf(doc, clip.assetId).durationSec,
         ...others
           .filter((item) => item.sourceStartSec >= clip.sourceEndSec - SAME_SOURCE_SEC)
           .map((item) => item.sourceStartSec),
@@ -461,6 +463,7 @@ export function mergeBlocker(doc: DemoDocument, clipId: string): string | null {
   const index = doc.clips.findIndex((clip) => clip.id === clipId);
   const next = doc.clips[index + 1];
   if (index === -1 || !next) return "結合する隣の手順がありません。";
+  if (doc.clips[index].assetId !== next.assetId) return "別の動画の手順とは結合できません。";
   if (!joinedNeighbor(doc, clipId, "end")) {
     return "並べ替えや削除で元の映像が続いていないため、結合できません。";
   }
@@ -647,12 +650,13 @@ export function removeCaption(doc: DemoDocument, captionId: string): DemoDocumen
 
 export type BlurRect = Pick<Blur, "x" | "y" | "width" | "height">;
 
-// 隠し忘れを防ぐため、新しいぼかしは動画全体にかける。
-export function addBlur(doc: DemoDocument, rect: BlurRect): DemoDocument {
+// 隠し忘れを防ぐため、新しいぼかしはその動画の全体にかける。ほかの動画は画面が違うのでかけない。
+export function addBlur(doc: DemoDocument, assetId: string, rect: BlurRect): DemoDocument {
   const blur: Blur = {
     id: newId(),
+    assetId,
     sourceStartSec: 0,
-    sourceEndSec: doc.asset.durationSec,
+    sourceEndSec: assetOf(doc, assetId).durationSec,
     style: "mosaic",
     ...rect,
   };
@@ -689,9 +693,10 @@ export function removeBlur(doc: DemoDocument, blurId: string): DemoDocument {
 }
 
 // 書き出しでは終了時刻ちょうどのコマも描く。隠し損ねないよう、両端を 1 コマ分広げる。
-export function blursAt(doc: DemoDocument, sourceSec: number) {
+export function blursAt(doc: DemoDocument, assetId: string, sourceSec: number) {
   return doc.blurs.filter(
     (item) =>
+      item.assetId === assetId &&
       sourceSec >= item.sourceStartSec - BLUR_MARGIN_SEC &&
       sourceSec <= item.sourceEndSec + BLUR_MARGIN_SEC,
   );

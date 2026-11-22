@@ -3,7 +3,7 @@ import { createDocument, type DemoDocument } from "./document";
 import { defaultExportAudio } from "./export";
 
 function withNarration(patch: Partial<DemoDocument["narration"]>): DemoDocument {
-  const doc = createDocument({ name: "a.webm", durationSec: 10, width: 1920, height: 1080 });
+  const doc = createDocument([{ id: "a", name: "a.webm", durationSec: 10, width: 1920, height: 1080 }]);
   return { ...doc, narration: { ...doc.narration, ...patch } };
 }
 

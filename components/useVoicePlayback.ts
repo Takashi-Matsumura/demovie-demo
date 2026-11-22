@@ -17,7 +17,7 @@ export type VoicePlayback = {
 export function useVoicePlayback(
   doc: DemoDocument,
   glossary: string,
-  videoRef: RefObject<HTMLVideoElement | null>,
+  videosRef: RefObject<Map<string, HTMLVideoElement>>,
 ) {
   const [error, setError] = useState<string | null>(null);
   const [preparing, setPreparing] = useState(false);
@@ -71,7 +71,7 @@ export function useVoicePlayback(
       requestRef.current += 1;
       sourceRef.current?.stop();
       sourceRef.current = null;
-      if (videoRef.current) videoRef.current.muted = false;
+      for (const video of videosRef.current.values()) video.muted = false;
     },
   });
 
@@ -88,7 +88,7 @@ export function useVoicePlayback(
         await synthesize(applyReadings(text, terms), voiceId, speed);
       }
       activeRef.current = true;
-      if (videoRef.current) videoRef.current.muted = !keepOriginalAudio;
+      for (const video of videosRef.current.values()) video.muted = !keepOriginalAudio;
       return true;
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "読み上げられませんでした。");

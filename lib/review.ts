@@ -2,16 +2,20 @@ import { applyCommands, type ResolvedCommand } from "./commands";
 import type { DemoDocument } from "./document";
 import { clipSpans } from "./timeline";
 
-export type ReviewPlan = { commands: ResolvedCommand[]; sourceSec: number };
+/** assetId と sourceSec は、話した位置の動画とその中の時刻。 */
+export type ReviewPlan = { commands: ResolvedCommand[]; assetId: string; sourceSec: number };
 
 export type ReviewOutcome = { doc: DemoDocument; done: string[]; failed: string[] };
 
 const NEEDS_PLAYHEAD = new Set<ResolvedCommand["type"]>(["split_here", "add_zoom", "zoom_focus"]);
 
-// 話した位置は素材の時刻で覚える。前の指示で手順が消えても、タイムライン時刻と違ってズレない。
-export function timelineAt(doc: DemoDocument, sourceSec: number) {
+// 話した位置は動画と素材の時刻で覚える。前の指示で手順が消えても、タイムライン時刻と違ってズレない。
+export function timelineAt(doc: DemoDocument, assetId: string, sourceSec: number) {
   const span = clipSpans(doc).find(
-    ({ clip }) => sourceSec >= clip.sourceStartSec && sourceSec < clip.sourceEndSec,
+    ({ clip }) =>
+      clip.assetId === assetId &&
+      sourceSec >= clip.sourceStartSec &&
+      sourceSec < clip.sourceEndSec,
   );
   return span ? span.videoStartSec + sourceSec - span.clip.sourceStartSec : null;
 }
@@ -23,8 +27,8 @@ export function applyReview(doc: DemoDocument, plans: ReviewPlan[]): ReviewOutco
   const failed: string[] = [];
   let next = doc;
 
-  for (const { commands, sourceSec } of plans) {
-    const timeSec = timelineAt(next, sourceSec);
+  for (const { commands, assetId, sourceSec } of plans) {
+    const timeSec = timelineAt(next, assetId, sourceSec);
     if (timeSec === null && commands.some((command) => NEEDS_PLAYHEAD.has(command.type))) {
       failed.push("指示した位置の手順がなくなっています。");
       continue;

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import {
+  assetOf,
   BACKGROUND_IDS,
   type Blur,
   type Caption,
@@ -27,6 +28,8 @@ type CaptionPanel = {
 type InspectorProps = {
   services: ServiceStatus[];
   doc: DemoDocument;
+  /** いま表示している手順の動画。ぼかしはその動画のものだけを出す。 */
+  assetId: string;
   zoom: Zoom | null;
   caption: CaptionPanel | null;
   glossary: string;
@@ -79,6 +82,7 @@ function Slider({ label, value, min, max, step, unit, onChange }: SliderProps) {
 export function Inspector({
   services,
   doc,
+  assetId,
   zoom,
   caption,
   glossary,
@@ -96,6 +100,9 @@ export function Inspector({
   onCaptionRemove,
 }: InspectorProps) {
   const { look } = doc;
+  // ぼかしは動画ごとに画面が違うので、いま見ている動画のものだけを並べる。
+  const blurs = doc.blurs.filter((blur) => blur.assetId === assetId);
+  const assetDurationSec = assetOf(doc, assetId).durationSec;
   const [lookOpen, setLookOpen] = useState(true);
   const [glossaryOpen, setGlossaryOpen] = useState(false);
   const [voices, setVoices] = useState<Voice[]>([]);
@@ -285,11 +292,11 @@ export function Inspector({
         )}
       </section>
 
-      {doc.blurs.length > 0 && (
+      {blurs.length > 0 && (
         <section className="flex flex-col gap-2">
-          <h2 className="text-sm font-semibold">ぼかし（{doc.blurs.length}）</h2>
+          <h2 className="text-sm font-semibold">ぼかし（{blurs.length}）</h2>
           <ul className="flex flex-col gap-1">
-            {doc.blurs.map((blur, index) => (
+            {blurs.map((blur, index) => (
               <li key={blur.id} className="flex flex-wrap items-center gap-2 text-sm">
                 <select
                   aria-label={`ぼかし ${index + 1} の種類`}
@@ -306,7 +313,7 @@ export function Inspector({
                   aria-label={`ぼかし ${index + 1} の範囲`}
                   className="order-last w-full rounded bg-paper-3 p-1 text-sm"
                   value={
-                    blur.sourceEndSec - blur.sourceStartSec >= doc.asset.durationSec
+                    blur.sourceEndSec - blur.sourceStartSec >= assetDurationSec
                       ? "all"
                       : "step"
                   }
@@ -314,7 +321,7 @@ export function Inspector({
                     onBlurScope(blur.id, event.target.value === "all" ? "all" : "step")
                   }
                 >
-                  <option value="all">動画全体</option>
+                  <option value="all">{doc.assets.length > 1 ? "この動画の全体" : "動画全体"}</option>
                   <option value="step">今の手順だけ</option>
                 </select>
                 <button

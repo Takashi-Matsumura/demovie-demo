@@ -1,5 +1,5 @@
 import type { DemoDocument } from "./document";
-import { pickMimeType, seekTo, waitForEvent } from "./media";
+import { pickMimeType, seekTo, waitForEvent, type VideoSources } from "./media";
 import { prepareNarration, voiceKey } from "./narration";
 import { drawChapter, drawFrame, OUTPUT_HEIGHT, OUTPUT_WIDTH } from "./render";
 import { clipSpans, totalDuration } from "./timeline";
@@ -23,7 +23,7 @@ type ExportOptions = {
   doc: DemoDocument;
   audio: ExportAudio;
   glossary: string;
-  src: string;
+  sources: VideoSources;
   signal: AbortSignal;
   onProgress: (ratio: number) => void;
 };
@@ -107,7 +107,7 @@ export async function exportVideo({
   doc: edited,
   audio,
   glossary,
-  src,
+  sources,
   signal,
   onProgress,
 }: ExportOptions) {
@@ -123,13 +123,21 @@ export async function exportVideo({
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("Canvas を初期化できませんでした。");
 
-  const video = document.createElement("video");
-  video.playsInline = true;
-  // 音声なしのときは音の経路を作らないので、スピーカーへ出ないよう消音しておく。
-  video.muted = !withAudio;
-  const loaded = waitForEvent(video, "loadeddata");
-  video.src = src;
-  await loaded;
+  // 動画に含める手順が使う動画だけを開く。
+  const assetIds = [...new Set(clipSpans(doc).map((span) => span.clip.assetId))];
+  const videos = new Map<string, HTMLVideoElement>();
+  for (const assetId of assetIds) {
+    const src = sources[assetId];
+    if (!src) throw new Error("手順の動画が見つかりませんでした。");
+    const video = document.createElement("video");
+    video.playsInline = true;
+    // 音声なしのときは音の経路を作らないので、スピーカーへ出ないよう消音しておく。
+    video.muted = !withAudio;
+    videos.set(assetId, video);
+    const loaded = waitForEvent(video, "loadeddata");
+    video.src = src;
+    await loaded;
+  }
 
   const audioContext = withAudio ? new AudioContext() : null;
   const audioOutput = audioContext?.createMediaStreamDestination() ?? null;
@@ -140,7 +148,10 @@ export async function exportVideo({
     // 接続しないと動画の音がスピーカーへ出るので、消すときは音量 0 を通す。
     const originalGain = audioContext.createGain();
     originalGain.gain.value = audio.original ? 1 : 0;
-    audioContext.createMediaElementSource(video).connect(originalGain).connect(audioOutput);
+    originalGain.connect(audioOutput);
+    for (const video of videos.values()) {
+      audioContext.createMediaElementSource(video).connect(originalGain);
+    }
   }
 
   const stream = new MediaStream([
@@ -180,6 +191,8 @@ export async function exportVideo({
         recorder.pause();
       }
 
+      const video = videos.get(clip.assetId);
+      if (!video) throw new Error("手順の動画が見つかりませんでした。");
       // 開始時刻ちょうどだと直前のコマ、つまり削除した区間の最後が映ることがある。
       const firstSec = clip.sourceStartSec + FRAME_SEC;
       await seekTo(video, firstSec);
@@ -219,11 +232,13 @@ export async function exportVideo({
     await stopped;
     return { blob: new Blob(chunks, { type: mimeType }), mimeType };
   } finally {
-    video.pause();
+    for (const video of videos.values()) video.pause();
     if (recorder.state !== "inactive") recorder.stop();
     stream.getTracks().forEach((track) => track.stop());
     await audioContext?.close();
-    video.removeAttribute("src");
-    video.load();
+    for (const video of videos.values()) {
+      video.removeAttribute("src");
+      video.load();
+    }
   }
 }

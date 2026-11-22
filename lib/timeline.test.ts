@@ -39,7 +39,7 @@ import {
 } from "./timeline";
 
 function makeDoc(): DemoDocument {
-  return createDocument({ name: "a.webm", durationSec: 10, width: 1920, height: 1080 });
+  return createDocument([{ id: "a", name: "a.webm", durationSec: 10, width: 1920, height: 1080 }]);
 }
 
 function withZoom(doc: DemoDocument, timelineSec: number) {
@@ -321,37 +321,37 @@ describe("blurs", () => {
   const rect = { x: 0.1, y: 0.1, width: 0.2, height: 0.1 };
 
   it("covers the whole video by default", () => {
-    const doc = addBlur(makeDoc(), rect);
-    expect(blursAt(doc, 0)).toHaveLength(1);
-    expect(blursAt(doc, 9.9)).toHaveLength(1);
+    const doc = addBlur(makeDoc(), "a", rect);
+    expect(blursAt(doc, "a", 0)).toHaveLength(1);
+    expect(blursAt(doc, "a", 9.9)).toHaveLength(1);
     expect(documentSchema.safeParse(doc).success).toBe(true);
   });
 
   it("stays on the same footage through splits, moves and deletes", () => {
-    const doc = addBlur(splitAt(makeDoc(), 4), rect);
+    const doc = addBlur(splitAt(makeDoc(), 4), "a", rect);
     const moved = moveClip(doc, doc.clips[1].id, -1);
     const deleted = deleteClip(splitAt(moved, 2), moved.clips[0].id);
     expect(deleted.blurs).toEqual(doc.blurs);
-    expect(blursAt(deleted, 7)).toHaveLength(1);
+    expect(blursAt(deleted, "a", 7)).toHaveLength(1);
   });
 
   it("can be narrowed and removed", () => {
-    const doc = addBlur(makeDoc(), rect);
+    const doc = addBlur(makeDoc(), "a", rect);
     const { id } = doc.blurs[0];
     const narrowed = setBlurRange(doc, id, 2, 4);
-    expect(blursAt(narrowed, 1)).toEqual([]);
-    expect(blursAt(narrowed, 2)).toHaveLength(1);
-    expect(blursAt(narrowed, 4.1)).toEqual([]);
+    expect(blursAt(narrowed, "a", 1)).toEqual([]);
+    expect(blursAt(narrowed, "a", 2)).toHaveLength(1);
+    expect(blursAt(narrowed, "a", 4.1)).toEqual([]);
     expect(removeBlur(doc, id).blurs).toEqual([]);
   });
 
   it("covers the frames at both ends of its range", () => {
-    const doc = addBlur(makeDoc(), rect);
+    const doc = addBlur(makeDoc(), "a", rect);
     const { id } = doc.blurs[0];
-    expect(blursAt(doc, doc.asset.durationSec)).toHaveLength(1);
+    expect(blursAt(doc, "a", doc.assets[0].durationSec)).toHaveLength(1);
     const narrowed = setBlurRange(doc, id, 2, 4);
-    expect(blursAt(narrowed, 4)).toHaveLength(1);
-    expect(blursAt(narrowed, 1.98)).toHaveLength(1);
+    expect(blursAt(narrowed, "a", 4)).toHaveLength(1);
+    expect(blursAt(narrowed, "a", 1.98)).toHaveLength(1);
   });
 
   it("sizes mosaic blocks by the recording, not the zoomed output", () => {
@@ -366,7 +366,7 @@ describe("blurs", () => {
   });
 
   it("switches to a solid box and back", () => {
-    const doc = addBlur(makeDoc(), rect);
+    const doc = addBlur(makeDoc(), "a", rect);
     expect(doc.blurs[0].style).toBe("mosaic");
     const solid = setBlurStyle(doc, doc.blurs[0].id, "solid");
     expect(solid.blurs[0].style).toBe("solid");
@@ -374,7 +374,7 @@ describe("blurs", () => {
   });
 
   it("opens blurs saved before styles existed as mosaics", () => {
-    const doc = addBlur(makeDoc(), rect);
+    const doc = addBlur(makeDoc(), "a", rect);
     const { style: _style, ...saved } = doc.blurs[0];
     expect(_style).toBe("mosaic");
     expect(documentSchema.parse({ ...doc, blurs: [saved] }).blurs[0].style).toBe("mosaic");
@@ -394,7 +394,7 @@ describe("thumbnails", () => {
   });
 
   it("keeps blurs while dropping the frame around the video", () => {
-    const doc = addBlur(makeDoc(), { x: 0, y: 0, width: 0.5, height: 0.5 });
+    const doc = addBlur(makeDoc(), "a", { x: 0, y: 0, width: 0.5, height: 0.5 });
     const plain = thumbnailDoc(doc);
     expect(plain.blurs).toEqual(doc.blurs);
     expect(plain.look.paddingPct).toBe(0);

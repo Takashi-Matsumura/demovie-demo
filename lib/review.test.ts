@@ -4,7 +4,7 @@ import { applyReview, timelineAt } from "./review";
 import { addZoom, setStepText, splitAt, stepSpans, totalDuration } from "./timeline";
 
 function threeSteps(): DemoDocument {
-  const doc = createDocument({ name: "a.webm", durationSec: 9, width: 1920, height: 1080 });
+  const doc = createDocument([{ id: "a", name: "a.webm", durationSec: 9, width: 1920, height: 1080 }]);
   return splitAt(splitAt(doc, 3), 6);
 }
 
@@ -12,8 +12,8 @@ describe("timelineAt", () => {
   it("follows a clip that moved and reports a removed one", () => {
     const base = threeSteps();
     const trimmed = { ...base, clips: base.clips.slice(1) };
-    expect(timelineAt(trimmed, 4)).toBe(1);
-    expect(timelineAt(trimmed, 1)).toBeNull();
+    expect(timelineAt(trimmed, "a", 4)).toBe(1);
+    expect(timelineAt(trimmed, "a", 1)).toBeNull();
   });
 });
 
@@ -21,8 +21,8 @@ describe("applyReview", () => {
   it("keeps step numbers fixed across instructions", () => {
     const base = threeSteps();
     const { doc, done, failed } = applyReview(base, [
-      { commands: [{ type: "delete_step", step: 1 }], sourceSec: 0 },
-      { commands: [{ type: "set_step_text", step: 3, text: "最後" }], sourceSec: 7 },
+      { commands: [{ type: "delete_step", step: 1 }], assetId: "a", sourceSec: 0 },
+      { commands: [{ type: "set_step_text", step: 3, text: "最後" }], assetId: "a", sourceSec: 7 },
     ]);
     expect(failed).toEqual([]);
     expect(done).toHaveLength(2);
@@ -31,8 +31,8 @@ describe("applyReview", () => {
 
   it("uses the spoken position after earlier steps are gone", () => {
     const { doc } = applyReview(threeSteps(), [
-      { commands: [{ type: "delete_step", step: 1 }], sourceSec: 0 },
-      { commands: [{ type: "split_here" }], sourceSec: 4.5 },
+      { commands: [{ type: "delete_step", step: 1 }], assetId: "a", sourceSec: 0 },
+      { commands: [{ type: "split_here" }], assetId: "a", sourceSec: 4.5 },
     ]);
     expect(doc.clips.map((clip) => [clip.sourceStartSec, clip.sourceEndSec])).toEqual([
       [3, 4.5],
@@ -44,10 +44,10 @@ describe("applyReview", () => {
   it("reports a failure and still applies the rest", () => {
     const base = threeSteps();
     const { doc, done, failed } = applyReview(base, [
-      { commands: [{ type: "delete_step", step: 1 }], sourceSec: 7 },
-      { commands: [{ type: "split_here" }], sourceSec: 1 },
-      { commands: [{ type: "delete_step", step: 1 }], sourceSec: 7 },
-      { commands: [{ type: "delete_step", step: 2 }], sourceSec: 7 },
+      { commands: [{ type: "delete_step", step: 1 }], assetId: "a", sourceSec: 7 },
+      { commands: [{ type: "split_here" }], assetId: "a", sourceSec: 1 },
+      { commands: [{ type: "delete_step", step: 1 }], assetId: "a", sourceSec: 7 },
+      { commands: [{ type: "delete_step", step: 2 }], assetId: "a", sourceSec: 7 },
     ]);
     expect(done).toHaveLength(2);
     expect(failed).toEqual(["指示した位置の手順がなくなっています。", "手順 1 はすでにありません。"]);
@@ -60,13 +60,13 @@ describe("applyReview", () => {
     if (!zoomed) throw new Error("zoom was not added");
     const named = setStepText(zoomed.doc, base.clips[1].id, "元の文");
     const { doc } = applyReview(named, [
-      { commands: [{ type: "set_zoom_depth", step: 2, depth: 3 }], sourceSec: 4 },
+      { commands: [{ type: "set_zoom_depth", step: 2, depth: 3 }], assetId: "a", sourceSec: 4 },
     ]);
     expect(doc.zooms[0].depth).toBe(3);
   });
 
   it("does not run undo in a batch", () => {
-    const { failed } = applyReview(threeSteps(), [{ commands: [{ type: "undo" }], sourceSec: 0 }]);
+    const { failed } = applyReview(threeSteps(), [{ commands: [{ type: "undo" }], assetId: "a", sourceSec: 0 }]);
     expect(failed).toHaveLength(1);
   });
 });

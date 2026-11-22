@@ -13,9 +13,12 @@ const VOICE_START_WINDOW_SEC = 0.5;
 // 読み上げを待つ間、チャプター画面の区間に留まるための小さな余白。
 const CHAPTER_HOLD_SEC = 0.001;
 
+/** 動画（asset）の ID ごとの <video>。再生位置の手順の動画を使う。 */
+export type VideoBank = RefObject<Map<string, HTMLVideoElement>>;
+
 export function usePlayer(
   doc: DemoDocument,
-  videoRef: RefObject<HTMLVideoElement | null>,
+  videosRef: VideoBank,
   canvasRef: RefObject<HTMLCanvasElement | null>,
   voiceRef: RefObject<VoicePlayback>,
 ) {
@@ -26,29 +29,41 @@ export function usePlayer(
   const playingRef = useRef(false);
   const spokenClipRef = useRef<string | null>(null);
 
+  // 動画が増えたら、増えた <video> にも再生の合図をつなぎ直す。
+  const assetKey = doc.assets.map((asset) => asset.id).join("\n");
+
   const updatePlaying = useCallback((next: boolean) => {
     playingRef.current = next;
     setPlaying(next);
   }, []);
 
+  const videoAt = useCallback(
+    (timelineSec: number) =>
+      videosRef.current.get(locate(docRef.current, timelineSec).clip.assetId) ?? null,
+    [videosRef],
+  );
+
+  const pauseAll = useCallback(() => {
+    for (const video of videosRef.current.values()) video.pause();
+  }, [videosRef]);
+
   const paint = useCallback(() => {
     const ctx = canvasRef.current?.getContext("2d");
-    const video = videoRef.current;
-    if (!ctx || !video) return;
-    drawAt(ctx, video, docRef.current, timeRef.current);
-  }, [canvasRef, videoRef]);
+    if (!ctx) return;
+    drawAt(ctx, (assetId) => videosRef.current.get(assetId), docRef.current, timeRef.current);
+  }, [canvasRef, videosRef]);
 
   const placeVideo = useCallback(() => {
-    const video = videoRef.current;
+    const video = videoAt(timeRef.current);
     if (!video) return;
     const { sourceSec } = locate(docRef.current, timeRef.current);
     if (Math.abs(video.currentTime - sourceSec) > 0.001) video.currentTime = sourceSec;
     paint();
-  }, [paint, videoRef]);
+  }, [paint, videoAt]);
 
   const seek = useCallback(
     (nextSec: number) => {
-      videoRef.current?.pause();
+      pauseAll();
       voiceRef.current.stop();
       spokenClipRef.current = null;
       updatePlaying(false);
@@ -57,15 +72,13 @@ export function usePlayer(
       setTimeSec(clamped);
       placeVideo();
     },
-    [placeVideo, updatePlaying, videoRef, voiceRef],
+    [pauseAll, placeVideo, updatePlaying, voiceRef],
   );
 
   const toggle = useCallback(async () => {
-    const video = videoRef.current;
-    if (!video) return;
     // 読み上げの待ち時間は動画が止まっているので、再生中かどうかは自前の状態で判断する。
     if (playingRef.current) {
-      video.pause();
+      pauseAll();
       voiceRef.current.stop();
       spokenClipRef.current = null;
       updatePlaying(false);
@@ -77,6 +90,8 @@ export function usePlayer(
       updatePlaying(true);
       return;
     }
+    const video = videoAt(timeRef.current);
+    if (!video) return;
     try {
       await video.play();
       updatePlaying(true);
@@ -84,7 +99,7 @@ export function usePlayer(
       // ブラウザが自動再生を拒否した場合は停止状態のままにする。
       updatePlaying(false);
     }
-  }, [seek, updatePlaying, videoRef, voiceRef]);
+  }, [pauseAll, seek, updatePlaying, videoAt, voiceRef]);
 
   useEffect(() => {
     docRef.current = doc;
@@ -94,15 +109,18 @@ export function usePlayer(
   }, [doc, placeVideo, playing]);
 
   useEffect(() => {
-    const video = videoRef.current;
-    if (!video) return;
-    video.addEventListener("seeked", paint);
-    video.addEventListener("loadeddata", placeVideo);
+    const videos = [...videosRef.current.values()];
+    for (const video of videos) {
+      video.addEventListener("seeked", paint);
+      video.addEventListener("loadeddata", placeVideo);
+    }
     return () => {
-      video.removeEventListener("seeked", paint);
-      video.removeEventListener("loadeddata", placeVideo);
+      for (const video of videos) {
+        video.removeEventListener("seeked", paint);
+        video.removeEventListener("loadeddata", placeVideo);
+      }
     };
-  }, [paint, placeVideo, videoRef]);
+  }, [assetKey, paint, placeVideo, videosRef]);
 
   useEffect(() => {
     if (!playing) return;
@@ -111,16 +129,16 @@ export function usePlayer(
     const tick = (now: number) => {
       const elapsedSec = Math.max(0, (now - lastAt) / 1000);
       lastAt = now;
-      const video = videoRef.current;
-      if (!video) return;
       const spans = clipSpans(docRef.current);
       const { index, inChapter } = locate(docRef.current, timeRef.current);
       const span = spans[index];
+      const video = videosRef.current.get(span.clip.assetId);
+      if (!video) return;
       const voice = voiceRef.current;
 
       if (inChapter) {
         // チャプター画面は映像を止めたまま、経過時間で進める。読み上げ中は区間の終わりで待つ。
-        if (!video.paused) video.pause();
+        pauseAll();
         const key = voiceKey(span.clip.id, "chapter");
         if (voice.active() && spokenClipRef.current !== key) {
           spokenClipRef.current = key;
@@ -174,10 +192,17 @@ export function usePlayer(
           return;
         }
         timeRef.current = next.startSec;
-        video.currentTime = next.clip.sourceStartSec;
+        // 次の手順が別の動画なら、いまの動画を止めて次の動画に切り替える。
+        const nextVideo = videosRef.current.get(next.clip.assetId);
+        if (nextVideo !== video) video.pause();
+        if (!nextVideo) {
+          updatePlaying(false);
+          return;
+        }
+        nextVideo.currentTime = next.clip.sourceStartSec;
         // 次の手順がチャプター画面から始まるなら、映像はその区間が終わるまで流さない。
-        if (next.clip.chapter) video.pause();
-        else if (video.paused) void video.play();
+        if (next.clip.chapter) nextVideo.pause();
+        else if (nextVideo.paused) void nextVideo.play();
       } else {
         timeRef.current =
           span.videoStartSec + Math.max(0, video.currentTime - span.clip.sourceStartSec);
@@ -188,7 +213,7 @@ export function usePlayer(
     };
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, [paint, playing, updatePlaying, videoRef, voiceRef]);
+  }, [paint, pauseAll, playing, updatePlaying, videosRef, voiceRef]);
 
   return { timeSec: Math.min(timeSec, totalDuration(doc)), playing, seek, toggle };
 }

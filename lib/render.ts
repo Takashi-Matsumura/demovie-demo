@@ -1,4 +1,4 @@
-import type { Chapter, DemoDocument } from "./document";
+import { assetOf, type Chapter, type DemoDocument } from "./document";
 import { narrationCredit } from "./narration";
 import { blursAt, cameraAt, captionTextAt, locate } from "./timeline";
 
@@ -102,7 +102,8 @@ export function previewToVideo(
   canvasX: number,
   canvasY: number,
 ) {
-  const { width: vw, height: vh } = doc.asset;
+  const clip = doc.clips.find((item) => item.id === clipId);
+  const { width: vw, height: vh } = assetOf(doc, clip?.assetId ?? "");
   const frame = frameRectOf(doc, OUTPUT_WIDTH, OUTPUT_HEIGHT, vw, vh);
   const crop = cropOf(doc, clipId, sourceSec, vw, vh);
   const ratioX = clamp((canvasX - frame.x) / frame.width, 0, 1);
@@ -163,13 +164,14 @@ function drawBlurs(
   crop: Rect,
   vw: number,
   vh: number,
+  assetId: string,
 ) {
   mosaicCanvas ??= document.createElement("canvas");
   const mosaic = mosaicCanvas.getContext("2d");
   if (!mosaic) return;
   const scale = frame.width / crop.width;
 
-  for (const blur of blursAt(doc, sourceSec)) {
+  for (const blur of blursAt(doc, assetId, sourceSec)) {
     const blurX = blur.x * vw;
     const blurY = blur.y * vh;
     const blurWidth = blur.width * vw;
@@ -234,8 +236,10 @@ export function drawFrame(
   ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, width, height);
 
-  const videoWidth = video.videoWidth || doc.asset.width;
-  const videoHeight = video.videoHeight || doc.asset.height;
+  const assetId = doc.clips.find((clip) => clip.id === clipId)?.assetId ?? "";
+  const asset = assetOf(doc, assetId);
+  const videoWidth = video.videoWidth || asset.width;
+  const videoHeight = video.videoHeight || asset.height;
   const layout = layoutOf(doc, width, height, videoWidth, videoHeight);
   const { frame } = layout;
   const { x: frameX, y: frameY, width: frameWidth, height: frameHeight } = frame;
@@ -271,7 +275,7 @@ export function drawFrame(
       frameWidth,
       frameHeight,
     );
-    drawBlurs(ctx, video, doc, sourceSec, frame, crop, videoWidth, videoHeight);
+    drawBlurs(ctx, video, doc, sourceSec, frame, crop, videoWidth, videoHeight, asset.id);
   }
   ctx.restore();
 
@@ -345,16 +349,23 @@ export function drawChapter(ctx: CanvasRenderingContext2D, doc: DemoDocument, ch
   if (credit) drawCredit(ctx, credit);
 }
 
-/** 再生位置の画面を描く。チャプター画面の区間ならチャプター画面、それ以外は映像の手順。 */
+/**
+ * 再生位置の画面を描く。チャプター画面の区間ならチャプター画面、それ以外は映像の手順。
+ * 映像はその手順の動画から取る。
+ */
 export function drawAt(
   ctx: CanvasRenderingContext2D,
-  video: HTMLVideoElement,
+  videoOf: (assetId: string) => HTMLVideoElement | undefined,
   doc: DemoDocument,
   timelineSec: number,
 ) {
   const { clip, sourceSec, inChapter } = locate(doc, timelineSec);
-  if (inChapter && clip.chapter) drawChapter(ctx, doc, clip.chapter);
-  else drawFrame(ctx, video, doc, clip.id, sourceSec);
+  if (inChapter && clip.chapter) {
+    drawChapter(ctx, doc, clip.chapter);
+    return;
+  }
+  const video = videoOf(clip.assetId);
+  if (video) drawFrame(ctx, video, doc, clip.id, sourceSec);
 }
 
 function drawCredit(ctx: CanvasRenderingContext2D, credit: string) {

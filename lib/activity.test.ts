@@ -5,7 +5,7 @@ import { setClipIncluded, splitAt } from "./timeline";
 
 // 0〜4 秒、4〜10 秒の 2 手順に分けた文書。
 function twoSteps() {
-  const doc = createDocument({ name: "a.webm", durationSec: 10, width: 1920, height: 1080 });
+  const doc = createDocument([{ id: "a", name: "a.webm", durationSec: 10, width: 1920, height: 1080 }]);
   return splitAt(doc, 4);
 }
 

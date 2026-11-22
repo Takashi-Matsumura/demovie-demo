@@ -10,7 +10,7 @@ import { createDocument, type DemoDocument } from "./document";
 import { addZoom, setStepText, splitAt, stepSpans, totalDuration } from "./timeline";
 
 function threeSteps(): DemoDocument {
-  const doc = createDocument({ name: "a.webm", durationSec: 9, width: 1920, height: 1080 });
+  const doc = createDocument([{ id: "a", name: "a.webm", durationSec: 9, width: 1920, height: 1080 }]);
   return splitAt(splitAt(doc, 3), 6);
 }
 
@@ -102,7 +102,7 @@ describe("applyCommands", () => {
   });
 
   it("does not delete the last step or a missing zoom", () => {
-    const single = createDocument({ name: "a", durationSec: 3, width: 10, height: 10 });
+    const single = createDocument([{ id: "a", name: "a", durationSec: 3, width: 10, height: 10 }]);
     expect(applyCommands(single, [{ type: "delete_step", step: 1 }], 0).kind).toBe("failed");
     expect(applyCommands(single, [{ type: "remove_zoom", step: 1 }], 0).kind).toBe("failed");
   });

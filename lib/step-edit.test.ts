@@ -14,7 +14,7 @@ import {
 // 0〜4、4〜7、7〜10 秒の 3 手順。それぞれ手順全体を覆う説明文を持つ。
 function threeSteps(): DemoDocument {
   const base = splitAt(
-    splitAt(createDocument({ name: "a.webm", durationSec: 10, width: 1920, height: 1080 }), 4),
+    splitAt(createDocument([{ id: "a", name: "a.webm", durationSec: 10, width: 1920, height: 1080 }]), 4),
     7,
   );
   return {

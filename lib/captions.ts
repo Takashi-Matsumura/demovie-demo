@@ -1,6 +1,6 @@
 import { newId, type Caption, type Clip, type DemoDocument, type Zoom } from "./document";
 import { formatGlossary } from "./glossary";
-import { seekTo, waitForEvent } from "./media";
+import { seekTo, waitForEvent, type VideoSources } from "./media";
 import { isIncluded } from "./timeline";
 
 // 手元の llama-server を直接呼ぶ。動画のフレームはこの PC の外へは出ない。
@@ -310,34 +310,58 @@ type ProgressHandlers = {
   onProgress?: (message: string) => void;
   onActivity?: (activity: CaptionActivity) => void;
 };
-type Analyzer = { video: HTMLVideoElement; ctx: CanvasRenderingContext2D };
+// 動画は手順が指すものを初めて使うときに開く。動画が 1 本でも複数でも同じ流れで扱う。
+type Analyzer = {
+  videoOf: (assetId: string) => Promise<HTMLVideoElement>;
+  ctx: CanvasRenderingContext2D;
+};
 
-async function withAnalyzer<T>(src: string, run: (analyzer: Analyzer) => Promise<T>) {
+async function openAnalyzerVideo(src: string, opened: HTMLVideoElement[]) {
+  const video = document.createElement("video");
+  video.muted = true;
+  video.playsInline = true;
+  opened.push(video);
+  const loaded = waitForEvent(video, "loadeddata");
+  video.src = src;
+  await loaded;
+  // 読み込み直後の最初の読み取りが黒くなり、全画面の変化と誤判定することがある。
+  await seekTo(video, FIRST_READ_SEC);
+  return video;
+}
+
+async function withAnalyzer<T>(sources: VideoSources, run: (analyzer: Analyzer) => Promise<T>) {
   const canvas = document.createElement("canvas");
   canvas.width = SIGNATURE_WIDTH;
   canvas.height = SIGNATURE_HEIGHT;
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
   if (!ctx) throw new Error("Canvas を初期化できませんでした。");
 
-  const video = document.createElement("video");
-  video.muted = true;
-  video.playsInline = true;
-  const loaded = waitForEvent(video, "loadeddata");
-  video.src = src;
-  await loaded;
+  const opened: HTMLVideoElement[] = [];
+  const videos = new Map<string, Promise<HTMLVideoElement>>();
+  const videoOf = (assetId: string) => {
+    let video = videos.get(assetId);
+    if (!video) {
+      const src = sources[assetId];
+      video = src
+        ? openAnalyzerVideo(src, opened)
+        : Promise.reject(new Error("手順の動画が見つかりませんでした。"));
+      videos.set(assetId, video);
+    }
+    return video;
+  };
 
   try {
-    // 読み込み直後の最初の読み取りが黒くなり、全画面の変化と誤判定することがある。
-    await seekTo(video, FIRST_READ_SEC);
-    return await run({ video, ctx });
+    return await run({ videoOf, ctx });
   } finally {
-    video.removeAttribute("src");
-    video.load();
+    for (const video of opened) {
+      video.removeAttribute("src");
+      video.load();
+    }
   }
 }
 
 async function scanOperations(
-  { video, ctx }: Analyzer,
+  { videoOf, ctx }: Analyzer,
   doc: DemoDocument,
   signal: AbortSignal,
   { onProgress, onActivity }: ProgressHandlers,
@@ -349,6 +373,7 @@ async function scanOperations(
     onProgress?.(`画面の変化を解析中 ${clipIndex + 1} / ${clips.length}`);
     const scannedClipIds = clips.slice(0, clipIndex).map((done) => done.id);
     const frames: SignatureFrame[] = [];
+    const video = await videoOf(clip.assetId);
     for (const sec of sampleTimes(clip)) {
       signal.throwIfAborted();
       // 最初の読み取りは手順の少し前から始まるので、手順の始まりに留める。
@@ -364,10 +389,19 @@ async function scanOperations(
     groups.push(frames);
   }
   // 時計は録画全体で探す。分割後の短い手順だけでは、毎秒変わることを確かめられない。
-  const ignored = tickingMask(groups);
+  // 動画が違えば時計の位置も違うので、動画ごとに探す。
+  const ignored = new Map<string, ReturnType<typeof tickingMask>>();
+  for (const assetId of new Set(clips.map((clip) => clip.assetId))) {
+    ignored.set(
+      assetId,
+      tickingMask(groups.filter((_, index) => clips[index].assetId === assetId)),
+    );
+  }
   const found: FoundOperation[] = [];
   clips.forEach((clip, clipIndex) => {
-    const operations = findOperations(sampleChanges(groups[clipIndex], ignored));
+    const operations = findOperations(
+      sampleChanges(groups[clipIndex], ignored.get(clip.assetId) ?? null),
+    );
     operations.forEach((operation, index) => {
       const next = operations[index + 1]?.beforeSec ?? clip.sourceEndSec;
       found.push({ clip, operation, endSec: Math.min(operation.afterSec + HOLD_SEC, next) });
@@ -386,14 +420,14 @@ export function splitPointsOf(found: Pick<FoundOperation, "clip" | "operation">[
 
 type DetectOptions = {
   doc: DemoDocument;
-  src: string;
+  sources: VideoSources;
   signal: AbortSignal;
 } & ProgressHandlers;
 
 // AI を使わず、画面が変わった位置だけを返す。BIOS のようにカーソルの無い画面や、
 // 解析サーバが使えないときでも手順に分けられるようにする。
-export async function detectSplitPoints({ doc, src, signal, ...handlers }: DetectOptions) {
-  const { found } = await withAnalyzer(src, (analyzer) =>
+export async function detectSplitPoints({ doc, sources, signal, ...handlers }: DetectOptions) {
+  const { found } = await withAnalyzer(sources, (analyzer) =>
     scanOperations(analyzer, doc, signal, handlers),
   );
   return splitPointsOf(found);
@@ -402,7 +436,7 @@ export async function detectSplitPoints({ doc, src, signal, ...handlers }: Detec
 type GenerateOptions = {
   doc: DemoDocument;
   glossary: string;
-  src: string;
+  sources: VideoSources;
   signal: AbortSignal;
   onProgress: (message: string) => void;
   onActivity?: (activity: CaptionActivity) => void;
@@ -412,13 +446,13 @@ type GenerateOptions = {
 export async function generateCaptions({
   doc,
   glossary,
-  src,
+  sources,
   signal,
   onProgress,
   onActivity,
 }: GenerateOptions) {
-  return withAnalyzer(src, async (analyzer) => {
-    const { video, ctx } = analyzer;
+  return withAnalyzer(sources, async (analyzer) => {
+    const { videoOf, ctx } = analyzer;
     const { found, ignored } = await scanOperations(analyzer, doc, signal, {
       onProgress,
       onActivity,
@@ -437,6 +471,7 @@ export async function generateCaptions({
       signal.throwIfAborted();
       onProgress(`キャプションを生成中 ${index + 1} / ${found.length}`);
       onActivity?.({ phase: "caption", targets, results: [...results] });
+      const video = await videoOf(clip.assetId);
       await seekTo(video, operation.referenceSec ?? operation.beforeSec);
       const before = frameUrl(video);
       const beforeSignature: Uint8ClampedArray = signatureOf(ctx, video);
@@ -446,7 +481,7 @@ export async function generateCaptions({
         beforeSignature,
         signatureOf(ctx, video),
         SIGNATURE_WIDTH,
-        ignored,
+        ignored.get(clip.assetId) ?? null,
       );
       const text = await describe(before, frameUrl(video), buildPrompt(doc.purpose, glossary), signal);
       const { sourceStartSec } = targets[index];

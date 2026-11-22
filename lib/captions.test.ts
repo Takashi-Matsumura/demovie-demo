@@ -204,7 +204,7 @@ describe("suggestZoom", () => {
 });
 
 describe("splitPointsOf", () => {
-  const clip = { id: "c", sourceStartSec: 2, sourceEndSec: 10 };
+  const clip = { id: "c", assetId: "a", sourceStartSec: 2, sourceEndSec: 10 };
 
   it("splits just before each operation", () => {
     expect(splitPointsOf([{ clip, operation: { beforeSec: 5, afterSec: 6 } }])).toEqual([
