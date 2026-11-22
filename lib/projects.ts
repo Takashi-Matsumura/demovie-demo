@@ -1,9 +1,11 @@
 import { documentSchema, LEGACY_ASSET_ID, type DemoDocument } from "./document";
 
 const DB_NAME = "demovie";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const PROJECTS = "projects";
 const VIDEOS = "videos";
+// 作業を保存したフォルダ（FileSystemDirectoryHandle）。次に開いたときも同じフォルダへ保存できるようにする。
+const FOLDERS = "folders";
 
 export type ProjectSummary = {
   id: string;
@@ -31,10 +33,14 @@ function projectVideoRange(projectId: string) {
 function openDatabase() {
   return new Promise<IDBDatabase>((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
-    request.onupgradeneeded = () => {
-      // 一覧のたびに動画本体を読まないよう、ストアを分ける。
-      request.result.createObjectStore(PROJECTS, { keyPath: "id" });
-      request.result.createObjectStore(VIDEOS);
+    request.onupgradeneeded = (event) => {
+      const database = request.result;
+      if (event.oldVersion < 1) {
+        // 一覧のたびに動画本体を読まないよう、ストアを分ける。
+        database.createObjectStore(PROJECTS, { keyPath: "id" });
+        database.createObjectStore(VIDEOS);
+      }
+      if (event.oldVersion < 2) database.createObjectStore(FOLDERS);
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
@@ -47,7 +53,7 @@ async function withStores<T>(
 ) {
   const database = await openDatabase();
   return new Promise<T | undefined>((resolve, reject) => {
-    const transaction = database.transaction([PROJECTS, VIDEOS], mode);
+    const transaction = database.transaction([PROJECTS, VIDEOS, FOLDERS], mode);
     const request = run(transaction);
     transaction.oncomplete = () => {
       database.close();
@@ -96,13 +102,40 @@ export async function listProjects() {
   return (records ?? []).map(summaryOf).sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
-export function createProject(id: string, doc: DemoDocument, videos: StoredVideo[]) {
+export function createProject(
+  id: string,
+  doc: DemoDocument,
+  videos: StoredVideo[],
+  updatedAt = Date.now(),
+) {
   return withStores("readwrite", (transaction) => {
     for (const video of videos) {
       transaction.objectStore(VIDEOS).put(video.blob, videoKey(id, video.id));
     }
-    transaction.objectStore(PROJECTS).put({ id, updatedAt: Date.now(), doc });
+    transaction.objectStore(PROJECTS).put({ id, updatedAt, doc });
   });
+}
+
+/** 保存領域にある作業の中身と更新時刻。無いか読めなければ null。動画は読まない。 */
+export async function storedProject(id: string) {
+  const record = await withStores<ProjectRecord | undefined>("readonly", (transaction) =>
+    transaction.objectStore(PROJECTS).get(id),
+  );
+  const parsed = documentSchema.safeParse(record?.doc);
+  return record && parsed.success ? { doc: parsed.data, updatedAt: record.updatedAt } : null;
+}
+
+export function rememberFolder(id: string, folder: FileSystemDirectoryHandle) {
+  return withStores("readwrite", (transaction) => {
+    transaction.objectStore(FOLDERS).put(folder, id);
+  });
+}
+
+export async function folderOf(id: string) {
+  const folder = await withStores<FileSystemDirectoryHandle | undefined>("readonly", (transaction) =>
+    transaction.objectStore(FOLDERS).get(id),
+  );
+  return folder ?? null;
 }
 
 /** 編集中に足した動画を保存する。作業内容（doc）は自動保存で別に保存される。 */
@@ -157,5 +190,7 @@ export function deleteProject(id: string) {
     transaction.objectStore(PROJECTS).delete(id);
     transaction.objectStore(VIDEOS).delete(id);
     transaction.objectStore(VIDEOS).delete(projectVideoRange(id));
+    // 保存先のフォルダの覚え書きだけを消す。フォルダの中身には触れない。
+    transaction.objectStore(FOLDERS).delete(id);
   });
 }
