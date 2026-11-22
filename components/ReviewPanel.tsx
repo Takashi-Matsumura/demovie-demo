@@ -4,6 +4,7 @@ import { useState, type FormEvent } from "react";
 
 export type ReviewItem = {
   id: string;
+  assetId: string;
   sourceSec: number;
   label: string;
   state: "listening" | "instruction" | "chatter" | "failed";

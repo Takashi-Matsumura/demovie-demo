@@ -1,7 +1,13 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { DEFAULT_CHAPTER_SEC, type Chapter, type DemoDocument } from "@/lib/document";
+import {
+  assetOf,
+  DEFAULT_CHAPTER_SEC,
+  type Chapter,
+  type Clip,
+  type DemoDocument,
+} from "@/lib/document";
 import { canExclude, stepSpans } from "@/lib/timeline";
 import {
   ArrowDownIcon,
@@ -18,7 +24,7 @@ import {
 type StepsProps = {
   doc: DemoDocument;
   selectedClipId: string;
-  thumbnailOf: (clip: { sourceStartSec: number; sourceEndSec: number }) => string | undefined;
+  thumbnailOf: (clip: Clip) => string | undefined;
   onPurpose: (purpose: string) => void;
   onSelect: (clipId: string) => void;
   onText: (clipId: string, text: string) => void;
@@ -107,11 +113,19 @@ export function Steps({
                 <button
                   type="button"
                   aria-label={`手順 ${index + 1} へ移動`}
-                  className="mr-auto rounded px-1 font-mono text-xs text-ink-2 tabular-nums hover:bg-rule"
+                  className="mr-auto flex min-w-0 items-baseline rounded px-1 font-mono text-xs text-ink-2 tabular-nums hover:bg-rule"
                   onClick={() => onSelect(clip.id)}
                 >
-                  {index + 1} · {durationSec.toFixed(1)}秒
-                  {!included && <span className="ml-1.5 font-sans">含めない</span>}
+                  <span className="shrink-0">
+                    {index + 1} · {durationSec.toFixed(1)}秒
+                  </span>
+                  {/* 動画が複数あるときだけ、どの動画の手順かを示す。 */}
+                  {doc.assets.length > 1 && (
+                    <span className="ml-1.5 min-w-0 truncate font-sans">
+                      {assetOf(doc, clip.assetId).name}
+                    </span>
+                  )}
+                  {!included && <span className="ml-1.5 shrink-0 font-sans">含めない</span>}
                 </button>
                 {included && doc.narration.enabled && caption?.text.trim() && (
                   <IconButton

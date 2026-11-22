@@ -1,3 +1,6 @@
+/** 動画（asset）の ID ごとの、再生できる URL。 */
+export type VideoSources = Record<string, string>;
+
 const MIME_CANDIDATES = [
   "video/mp4;codecs=avc1.640028,mp4a.40.2",
   "video/mp4",

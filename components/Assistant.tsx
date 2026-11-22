@@ -6,6 +6,7 @@ import { applyCommands, type CommandResult, type ResolvedCommand } from "@/lib/c
 import { newId, type DemoDocument } from "@/lib/document";
 import { classifyIntent } from "@/lib/intent";
 import { resolveTargets } from "@/lib/locate";
+import type { VideoSources } from "@/lib/media";
 import { applyReview, timelineAt } from "@/lib/review";
 import { startRecording, toWav, transcribe, type VoiceRecording } from "@/lib/speech";
 import { locate } from "@/lib/timeline";
@@ -35,7 +36,8 @@ const KEY_MODES: Record<string, Mode> = { KeyV: "instruct", KeyC: "dictate" };
 
 type AssistantProps = {
   doc: DemoDocument;
-  src: string;
+  /** 動画（asset）の ID ごとの URL。画面の要素を探すとき、その位置の動画から画面を取る。 */
+  sources: VideoSources;
   timeSec: number;
   glossary: string;
   ended: boolean;
@@ -50,7 +52,7 @@ type AssistantProps = {
 
 export function Assistant({
   doc,
-  src,
+  sources,
   timeSec,
   glossary,
   ended,
@@ -97,8 +99,8 @@ export function Assistant({
         signal,
       });
       const { doc: current } = latestRef.current;
-      const { sourceSec } = locate(current, startSec);
-      const resolved = await resolveTargets(commands, src, sourceSec, signal);
+      const { clip, sourceSec } = locate(current, startSec);
+      const resolved = await resolveTargets(commands, sources[clip.assetId], sourceSec, signal);
       const result = applyCommands(current, resolved, startSec);
       questionRef.current = result.kind === "question" ? result.question : null;
       setApplied(result.kind === "applied");
@@ -115,7 +117,7 @@ export function Assistant({
         setReply({ heard: transcript, tone: "failed", message: result.message });
       }
     },
-    [onApply, onUndo, src],
+    [onApply, onUndo, sources],
   );
 
   const handle = useCallback(async (work: (signal: AbortSignal) => Promise<void>) => {
@@ -208,9 +210,10 @@ export function Assistant({
     const dictating = modeRef.current === "dictate";
     if (reviewStageRef.current === "listening" && reviewControllerRef.current) {
       const { doc: current } = latestRef.current;
-      const { step, sourceSec } = locate(current, startSec);
+      const { step, clip, sourceSec } = locate(current, startSec);
       const item: ReviewItem = {
         id: newId(),
+        assetId: clip.assetId,
         sourceSec,
         label: `手順 ${step + 1}`,
         state: "listening",
@@ -311,7 +314,7 @@ export function Assistant({
   const interpretReviewItem = useCallback(
     async (item: ReviewItem, transcript: string, question: string | null, signal: AbortSignal) => {
       const { doc: current, glossary: terms } = latestRef.current;
-      const itemSec = timelineAt(current, item.sourceSec) ?? 0;
+      const itemSec = timelineAt(current, item.assetId, item.sourceSec) ?? 0;
       try {
         const commands = await interpret({
           transcript,
@@ -321,7 +324,12 @@ export function Assistant({
           previousQuestion: question,
           signal,
         });
-        const resolved = await resolveTargets(commands, src, item.sourceSec, signal);
+        const resolved = await resolveTargets(
+          commands,
+          sources[item.assetId],
+          item.sourceSec,
+          signal,
+        );
         const result = applyCommands(current, resolved, itemSec);
         if (result.kind === "applied") {
           reviewCommandsRef.current.set(item.id, resolved);
@@ -348,7 +356,7 @@ export function Assistant({
         });
       }
     },
-    [patchReviewItem, src],
+    [patchReviewItem, sources],
   );
 
   // 手順番号が変わらないよう、指示は確認を終えてからまとめて解釈し、適用まで編集には触れない。
@@ -385,7 +393,9 @@ export function Assistant({
   const applySelected = () => {
     const plans = reviewItemsRef.current.flatMap((item) => {
       const commands = reviewCommandsRef.current.get(item.id);
-      return item.selected && commands ? [{ commands, sourceSec: item.sourceSec }] : [];
+      return item.selected && commands
+        ? [{ commands, assetId: item.assetId, sourceSec: item.sourceSec }]
+        : [];
     });
     const { doc: next, done, failed } = applyReview(latestRef.current.doc, plans);
     onApply({ kind: "applied", doc: next, message: done.join(" ") });

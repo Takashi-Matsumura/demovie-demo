@@ -78,13 +78,14 @@ async function locateElement(frame: string, target: string, signal: AbortSignal)
 // 座標は言葉から推測させず、指示した時点の実際の画面から求める。
 export async function resolveTargets(
   commands: Command[],
-  src: string,
+  src: string | undefined,
   sourceSec: number,
   signal: AbortSignal,
 ): Promise<ResolvedCommand[]> {
   if (!commands.some((command) => command.type === "zoom_to")) {
     return commands as ResolvedCommand[];
   }
+  if (!src) throw new Error("この手順の動画が見つかりませんでした。");
   const frame = await captureFrame(src, sourceSec);
   const resolved: ResolvedCommand[] = [];
   for (const command of commands) {

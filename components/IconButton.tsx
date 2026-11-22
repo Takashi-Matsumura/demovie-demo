@@ -164,6 +164,13 @@ export const ZoomIcon = (p: IconProps) => (
     <path d="m20 20-4-4M11 8v6M8 11h6" />
   </Svg>
 );
+export const VideoAddIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <rect x="2" y="6" width="14" height="12" rx="2" />
+    <path d="m16 10 6-3v10l-6-3" />
+    <path d="M9 9v6M6 12h6" />
+  </Svg>
+);
 export const MinusIcon = (p: IconProps) => (
   <Svg {...p}>
     <path d="M5 12h14" />

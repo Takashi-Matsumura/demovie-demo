@@ -1,4 +1,4 @@
-import { documentSchema, type DemoDocument } from "./document";
+import { documentSchema, LEGACY_ASSET_ID, type DemoDocument } from "./document";
 
 const DB_NAME = "demovie";
 const DB_VERSION = 1;
@@ -14,6 +14,19 @@ export type ProjectSummary = {
 };
 
 type ProjectRecord = { id: string; updatedAt: number; doc: DemoDocument };
+
+/** 保存する動画。id は動画（asset）の ID。 */
+export type StoredVideo = { id: string; blob: Blob };
+
+// 動画本体はプロジェクトと動画の ID の組で保存する。
+// 動画が 1 本だけだった頃の保存データは、プロジェクトの ID だけを鍵にしている。
+function videoKey(projectId: string, assetId: string) {
+  return assetId === LEGACY_ASSET_ID ? projectId : `${projectId}:${assetId}`;
+}
+
+function projectVideoRange(projectId: string) {
+  return IDBKeyRange.bound(`${projectId}:`, `${projectId}:\uffff`);
+}
 
 function openDatabase() {
   return new Promise<IDBDatabase>((resolve, reject) => {
@@ -51,7 +64,10 @@ function summaryOf({ id, updatedAt, doc }: ProjectRecord): ProjectSummary {
   return {
     id,
     updatedAt,
-    name: doc.asset.name,
+    name:
+      doc.assets.length > 1
+        ? `${doc.assets[0].name} ほか ${doc.assets.length - 1} 本`
+        : doc.assets[0].name,
     // 一覧には仕上がりの長さを出す。動画に含めない手順は数えず、チャプター画面は数える。
     durationSec: doc.clips
       .filter((clip) => !clip.hidden)
@@ -71,10 +87,21 @@ export async function listProjects() {
   return (records ?? []).map(summaryOf).sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
-export function createProject(id: string, doc: DemoDocument, video: Blob) {
+export function createProject(id: string, doc: DemoDocument, videos: StoredVideo[]) {
   return withStores("readwrite", (transaction) => {
-    transaction.objectStore(VIDEOS).put(video, id);
+    for (const video of videos) {
+      transaction.objectStore(VIDEOS).put(video.blob, videoKey(id, video.id));
+    }
     transaction.objectStore(PROJECTS).put({ id, updatedAt: Date.now(), doc });
+  });
+}
+
+/** 編集中に足した動画を保存する。作業内容（doc）は自動保存で別に保存される。 */
+export function addProjectVideos(id: string, videos: StoredVideo[]) {
+  return withStores("readwrite", (transaction) => {
+    for (const video of videos) {
+      transaction.objectStore(VIDEOS).put(video.blob, videoKey(id, video.id));
+    }
   });
 }
 
@@ -86,24 +113,40 @@ export function saveProject(id: string, doc: DemoDocument) {
 
 export async function loadProject(id: string) {
   const database = await openDatabase();
-  const [record, video] = await new Promise<[ProjectRecord | undefined, Blob | undefined]>(
-    (resolve, reject) => {
-      const transaction = database.transaction([PROJECTS, VIDEOS], "readonly");
-      const project = transaction.objectStore(PROJECTS).get(id);
-      const blob = transaction.objectStore(VIDEOS).get(id);
-      transaction.oncomplete = () => resolve([project.result, blob.result]);
-      transaction.onabort = transaction.onerror = () => reject(transaction.error);
-    },
-  );
-  database.close();
+  const record = await new Promise<ProjectRecord | undefined>((resolve, reject) => {
+    const transaction = database.transaction([PROJECTS], "readonly");
+    const project = transaction.objectStore(PROJECTS).get(id);
+    transaction.oncomplete = () => resolve(project.result);
+    transaction.onabort = transaction.onerror = () => reject(transaction.error);
+  });
   const parsed = documentSchema.safeParse(record?.doc);
-  if (!parsed.success || !video) throw new Error("保存データを読み込めませんでした。");
-  return { doc: parsed.data, video };
+  if (!parsed.success) {
+    database.close();
+    throw new Error("保存データを読み込めませんでした。");
+  }
+  const doc = parsed.data;
+  const blobs = await new Promise<(Blob | undefined)[]>((resolve, reject) => {
+    const transaction = database.transaction([VIDEOS], "readonly");
+    const requests = doc.assets.map((asset) =>
+      transaction.objectStore(VIDEOS).get(videoKey(id, asset.id)),
+    );
+    transaction.oncomplete = () => resolve(requests.map((request) => request.result));
+    transaction.onabort = transaction.onerror = () => reject(transaction.error);
+  });
+  database.close();
+  const videos: StoredVideo[] = [];
+  for (const [index, asset] of doc.assets.entries()) {
+    const blob = blobs[index];
+    if (!blob) throw new Error(`動画「${asset.name}」の保存データが見つかりませんでした。`);
+    videos.push({ id: asset.id, blob });
+  }
+  return { doc, videos };
 }
 
 export function deleteProject(id: string) {
   return withStores("readwrite", (transaction) => {
     transaction.objectStore(PROJECTS).delete(id);
     transaction.objectStore(VIDEOS).delete(id);
+    transaction.objectStore(VIDEOS).delete(projectVideoRange(id));
   });
 }

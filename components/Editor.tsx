@@ -10,7 +10,14 @@ import {
   type PointerEvent,
 } from "react";
 import { detectSplitPoints, generateCaptions, type CaptionActivity } from "@/lib/captions";
-import { createDocument, newId, type DemoDocument } from "@/lib/document";
+import {
+  addAssets,
+  assetOf,
+  createDocument,
+  newId,
+  type Asset,
+  type DemoDocument,
+} from "@/lib/document";
 import { defaultExportAudio, exportVideo, type ExportAudio } from "@/lib/export";
 import { formatTime } from "@/lib/format";
 import {
@@ -19,8 +26,10 @@ import {
   probeVideo,
   startScreenRecording,
   type ScreenRecording,
+  type VideoSources,
 } from "@/lib/media";
 import {
+  addProjectVideos,
   createProject,
   deleteProject,
   listProjects,
@@ -85,6 +94,7 @@ import {
   StopIcon,
   TuneIcon,
   UndoIcon,
+  VideoAddIcon,
   ZoomIcon,
 } from "./IconButton";
 import { Inspector } from "./Inspector";
@@ -106,27 +116,69 @@ const BUTTON =
 const PRIMARY =
   "rounded-md bg-accent px-3 py-1.5 text-sm font-medium whitespace-nowrap text-accent-ink transition-opacity duration-(--dur-fast) hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
 
-type Source = { url: string; name: string; projectId: string };
+/** urls は動画（asset）の ID ごとの再生用 URL。動画を足すと増える。 */
+type Source = { projectId: string; urls: VideoSources };
+
+/** 読み込む動画。name は元のファイル名などの表示名。 */
+type NamedVideo = { blob: Blob; name: string };
+
+type PreparedVideo = { asset: Asset; blob: Blob; url: string };
+
+// 動画の長さと大きさを読み取って、編集に使える形にする。1 本でも読めなければ全部やめる。
+async function prepareVideos(videos: NamedVideo[]): Promise<PreparedVideo[]> {
+  const prepared: PreparedVideo[] = [];
+  try {
+    for (const { blob, name } of videos) {
+      const url = URL.createObjectURL(blob);
+      try {
+        const info = await probeVideo(url);
+        prepared.push({ asset: { id: newId(), name, ...info }, blob, url });
+      } catch (cause) {
+        URL.revokeObjectURL(url);
+        throw new Error(videos.length > 1 ? `「${name}」: ${messageOf(cause)}` : messageOf(cause));
+      }
+    }
+    return prepared;
+  } catch (cause) {
+    for (const { url } of prepared) URL.revokeObjectURL(url);
+    throw cause;
+  }
+}
+
+function urlsOf(prepared: PreparedVideo[]): VideoSources {
+  return Object.fromEntries(prepared.map(({ asset, url }) => [asset.id, url]));
+}
+
+// 複数選んだときの順番は OS によって違うので、ファイル名の順（数字は数として）に並べる。
+function filesOf(list: FileList | null): NamedVideo[] {
+  return [...(list ?? [])]
+    .sort((a, b) => a.name.localeCompare(b.name, "ja", { numeric: true }))
+    .map((file) => ({ blob: file, name: file.name }));
+}
 
 export function Editor() {
   const { doc, canUndo, canRedo, load, edit, undo, redo, reset } = useDocument();
   const [source, setSource] = useState<Source | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // 作った URL は、プロジェクトを閉じるまで使い続ける。元に戻すで消えた動画も、やり直すで戻るため。
+  const urlsRef = useRef<VideoSources>({});
 
-  const openBlob = useCallback(
-    async (blob: Blob, name: string) => {
-      const url = URL.createObjectURL(blob);
+  const openVideos = useCallback(
+    async (videos: NamedVideo[]) => {
       try {
-        const info = await probeVideo(url);
-        const created = createDocument({ name, ...info });
+        const prepared = await prepareVideos(videos);
+        const [first, ...rest] = prepared.map(({ asset }) => asset);
+        if (!first) return;
+        const created = createDocument([first, ...rest]);
         const projectId = newId();
+        const stored = prepared.map(({ asset, blob }) => ({ id: asset.id, blob }));
         // 保存できなくても編集は続けられる。失敗は編集画面の保存表示で伝える。
-        await createProject(projectId, created, blob).catch(() => undefined);
+        await createProject(projectId, created, stored).catch(() => undefined);
         load(created);
-        setSource({ url, name, projectId });
+        urlsRef.current = urlsOf(prepared);
+        setSource({ projectId, urls: urlsRef.current });
         setError(null);
       } catch (cause) {
-        URL.revokeObjectURL(url);
         setError(messageOf(cause));
       }
     },
@@ -136,9 +188,12 @@ export function Editor() {
   const resume = useCallback(
     async (projectId: string) => {
       try {
-        const { doc: saved, video } = await loadProject(projectId);
+        const { doc: saved, videos } = await loadProject(projectId);
         load(saved);
-        setSource({ url: URL.createObjectURL(video), name: saved.asset.name, projectId });
+        urlsRef.current = Object.fromEntries(
+          videos.map(({ id, blob }) => [id, URL.createObjectURL(blob)]),
+        );
+        setSource({ projectId, urls: urlsRef.current });
         setError(null);
       } catch (cause) {
         setError(messageOf(cause));
@@ -147,13 +202,33 @@ export function Editor() {
     [load],
   );
 
+  // 編集中に動画を足す。足した動画は 1 つの手順として末尾に入る。元に戻すで取り消せる。
+  const addVideos = useCallback(
+    async (videos: NamedVideo[]) => {
+      if (!source) return;
+      const prepared = await prepareVideos(videos);
+      if (prepared.length === 0) return;
+      const stored = prepared.map(({ asset, blob }) => ({ id: asset.id, blob }));
+      // 動画本体を先に保存する。作業内容だけ保存されると、次に開いたとき動画が見つからない。
+      await addProjectVideos(source.projectId, stored).catch(() => undefined);
+      urlsRef.current = { ...urlsRef.current, ...urlsOf(prepared) };
+      setSource({ ...source, urls: urlsRef.current });
+      edit((current) => addAssets(current, prepared.map(({ asset }) => asset)));
+    },
+    [edit, source],
+  );
+
+  const projectId = source?.projectId;
   useEffect(() => {
-    if (!source) return;
-    return () => URL.revokeObjectURL(source.url);
-  }, [source]);
+    if (!projectId) return;
+    return () => {
+      for (const url of Object.values(urlsRef.current)) URL.revokeObjectURL(url);
+      urlsRef.current = {};
+    };
+  }, [projectId]);
 
   if (!doc || !source) {
-    return <StartScreen error={error} onError={setError} onOpen={openBlob} onResume={resume} />;
+    return <StartScreen error={error} onError={setError} onOpen={openVideos} onResume={resume} />;
   }
 
   return (
@@ -165,6 +240,7 @@ export function Editor() {
       edit={edit}
       undo={undo}
       redo={redo}
+      onAddVideos={addVideos}
       onClose={() => {
         reset();
         setSource(null);
@@ -176,7 +252,7 @@ export function Editor() {
 type StartScreenProps = {
   error: string | null;
   onError: (message: string | null) => void;
-  onOpen: (blob: Blob, name: string) => Promise<void>;
+  onOpen: (videos: NamedVideo[]) => Promise<void>;
   onResume: (projectId: string) => Promise<void>;
 };
 
@@ -193,7 +269,7 @@ function StartScreen({ error, onError, onOpen, onResume }: StartScreenProps) {
       setRecording(session);
       const blob = await session.finished;
       setRecording(null);
-      await onOpen(blob, `録画.${extensionFor(session.mimeType)}`);
+      await onOpen([{ blob, name: `録画.${extensionFor(session.mimeType)}` }]);
     } catch (cause) {
       setRecording(null);
       // 共有ダイアログのキャンセルはエラーとして扱わない。
@@ -207,7 +283,7 @@ function StartScreen({ error, onError, onOpen, onResume }: StartScreenProps) {
     setBusy("sample");
     try {
       const { blob, mimeType } = await generateSample();
-      await onOpen(blob, `サンプル.${extensionFor(mimeType)}`);
+      await onOpen([{ blob, name: `サンプル.${extensionFor(mimeType)}` }]);
     } catch (cause) {
       onError(messageOf(cause));
     } finally {
@@ -215,9 +291,11 @@ function StartScreen({ error, onError, onOpen, onResume }: StartScreenProps) {
     }
   };
 
-  const importFile = (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file) void onOpen(file, file.name);
+  const importFiles = (event: ChangeEvent<HTMLInputElement>) => {
+    const videos = filesOf(event.target.files);
+    // 同じファイルを選び直しても change が起きるよう、選択を空に戻す。
+    event.target.value = "";
+    if (videos.length > 0) void onOpen(videos);
   };
 
   return (
@@ -231,7 +309,10 @@ function StartScreen({ error, onError, onOpen, onResume }: StartScreenProps) {
         </div>
 
         {capturing ? (
-          <CapturePanel onCancel={() => setCapturing(false)} onOpen={onOpen} />
+          <CapturePanel
+            onCancel={() => setCapturing(false)}
+            onOpen={(blob, name) => onOpen([{ blob, name }])}
+          />
         ) : recording ? (
           <button type="button" className={PRIMARY} onClick={recording.stop}>
             録画を止めて編集する
@@ -261,7 +342,13 @@ function StartScreen({ error, onError, onOpen, onResume }: StartScreenProps) {
               className={`${BUTTON} cursor-pointer focus-within:outline-2 focus-within:outline-accent`}
             >
               動画を読み込む
-              <input type="file" accept="video/*" className="sr-only" onChange={importFile} />
+              <input
+                type="file"
+                accept="video/*"
+                multiple
+                className="sr-only"
+                onChange={importFiles}
+              />
             </label>
             <button
               type="button"
@@ -391,18 +478,30 @@ type WorkspaceProps = {
   edit: (change: (doc: DemoDocument) => DemoDocument) => void;
   undo: () => void;
   redo: () => void;
+  onAddVideos: (videos: NamedVideo[]) => Promise<void>;
   onClose: () => void;
 };
 
-function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }: WorkspaceProps) {
-  const videoRef = useRef<HTMLVideoElement>(null);
+function Workspace({
+  doc,
+  source,
+  canUndo,
+  canRedo,
+  edit,
+  undo,
+  redo,
+  onAddVideos,
+  onClose,
+}: WorkspaceProps) {
+  // 動画（asset）の ID ごとの <video>。再生位置の手順の動画を使う。
+  const videosRef = useRef(new Map<string, HTMLVideoElement>());
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const services = useServices();
   const captionAbortRef = useRef<AbortController | null>(null);
   const [glossary, setGlossary] = useGlossary();
-  const { voiceRef, activate, preparing, error: voiceError } = useVoicePlayback(doc, glossary, videoRef);
-  const { timeSec, playing, seek, toggle } = usePlayer(doc, videoRef, canvasRef, voiceRef);
+  const { voiceRef, activate, preparing, error: voiceError } = useVoicePlayback(doc, glossary, videosRef);
+  const { timeSec, playing, seek, toggle } = usePlayer(doc, videosRef, canvasRef, voiceRef);
   const [exportState, setExportState] = useState<ExportState>({ status: "idle" });
   // 書き出す前に、入れる音を選んでもらう。null のときは設定欄を閉じている。
   const [exportAudio, setExportAudio] = useState<ExportAudio | null>(null);
@@ -416,7 +515,8 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
   const previewScrollRef = useRef<HTMLDivElement>(null);
   // 倍率を変えても、見ていた場所が表示の中央に残るようにする。
   const previewCenterRef = useRef<{ x: number; y: number } | null>(null);
-  const thumbnailOf = useThumbnails(doc, source.url);
+  const thumbnailOf = useThumbnails(doc, source.urls);
+  const [adding, setAdding] = useState(false);
   const { speak, error: speechError } = useSpeech();
   const [saveFailed, setSaveFailed] = useState(false);
 
@@ -497,11 +597,11 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
         doc,
         audio,
         glossary,
-        src: source.url,
+        sources: source.urls,
         signal: controller.signal,
         onProgress: (ratio) => setExportState({ status: "running", ratio }),
       });
-      const baseName = source.name.replace(/\.[^.]+$/, "");
+      const baseName = doc.assets[0].name.replace(/\.[^.]+$/, "");
       setExportState({
         status: "done",
         url: URL.createObjectURL(blob),
@@ -582,7 +682,7 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
     setDragBox(null);
     if (width < MIN_BLUR_SIZE || height < MIN_BLUR_SIZE) return;
     const rect = { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), width, height };
-    edit((current) => addBlur(current, rect));
+    edit((current) => addBlur(current, clip.assetId, rect));
     setBlurring(false);
   };
 
@@ -600,7 +700,7 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
       const { captions, zooms } = await generateCaptions({
         doc,
         glossary,
-        src: source.url,
+        sources: source.urls,
         signal: controller.signal,
         onProgress: (message) =>
           setCaptionState((state) => ({ ...runningOf(state), status: "running", message })),
@@ -630,7 +730,7 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
     try {
       const points = await detectSplitPoints({
         doc,
-        src: source.url,
+        sources: source.urls,
         signal: controller.signal,
         onProgress: (message) =>
           setCaptionState((state) => ({ ...runningOf(state), status: "running", message })),
@@ -662,7 +762,19 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
 
   return (
     <main className="flex w-full flex-1 flex-col gap-3 p-4">
-      <video ref={videoRef} src={source.url} playsInline preload="auto" className="hidden" />
+      {doc.assets.map((asset) => (
+        <video
+          key={asset.id}
+          ref={(video) => {
+            if (video) videosRef.current.set(asset.id, video);
+            else videosRef.current.delete(asset.id);
+          }}
+          src={source.urls[asset.id]}
+          playsInline
+          preload="auto"
+          className="hidden"
+        />
+      ))}
 
       <header className="flex flex-wrap items-center gap-2">
         {exporting ? (
@@ -681,13 +793,29 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
             <ExportIcon />
           </IconButton>
         )}
-        <h1 className="min-w-0 truncate text-sm font-semibold">{source.name}</h1>
+        <h1 className="min-w-0 truncate text-sm font-semibold">
+          {doc.assets.length > 1
+            ? `${doc.assets[0].name} ほか ${doc.assets.length - 1} 本`
+            : doc.assets[0].name}
+        </h1>
         <span
           role={saveFailed ? "alert" : undefined}
           className={`mr-auto text-xs ${saveFailed ? "text-danger" : "text-ink-2"}`}
         >
           {saveFailed ? "保存できませんでした" : "自動保存"}
         </span>
+        <IconButton
+          label="動画を追加"
+          aria-expanded={adding}
+          tone={adding ? "default" : "quiet"}
+          disabled={exporting || generating}
+          onClick={() => {
+            if (playing) void toggle();
+            setAdding((open) => !open);
+          }}
+        >
+          <VideoAddIcon />
+        </IconButton>
         <IconButton
           label={stepsOpen ? "手順パネルを隠す" : "手順パネルを表示"}
           aria-pressed={stepsOpen}
@@ -731,6 +859,15 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
           onStart={() => void startExport(exportAudio)}
         />
       )}
+      {adding && (
+        <AddVideoPanel
+          onAdd={async (videos) => {
+            await onAddVideos(videos);
+            setAdding(false);
+          }}
+          onClose={() => setAdding(false)}
+        />
+      )}
       <ExportStatus state={exportState} />
       <CaptionStatus state={captionState} />
       {(speechError ?? voiceError) && (
@@ -761,7 +898,8 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
         <div className="flex min-w-0 flex-col gap-3">
           {blurring && (
             <p aria-live="polite" className="text-sm text-ink-2">
-              隠したい範囲をプレビュー上でドラッグしてください。動画全体にかかります。
+              隠したい範囲をプレビュー上でドラッグしてください。
+              {doc.assets.length > 1 ? "いま表示している動画の全体にかかります。" : "動画全体にかかります。"}
             </p>
           )}
           <div
@@ -917,7 +1055,7 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
 
           <Assistant
             doc={doc}
-            src={source.url}
+            sources={source.urls}
             timeSec={timeSec}
             glossary={glossary}
             ended={!playing && timeSec >= totalDuration(doc) - END_MARGIN_SEC}
@@ -988,6 +1126,7 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
           <Inspector
             services={services}
             doc={doc}
+            assetId={currentClip.assetId}
             zoom={zoom}
             caption={captionSpan && bounds && { ...captionSpan, ...bounds }}
             glossary={glossary}
@@ -997,11 +1136,13 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
             }
             onBlurScope={(blurId, scope) => {
               const { sourceStartSec, sourceEndSec } = currentClip;
-              edit((current) =>
-                scope === "all"
-                  ? setBlurRange(current, blurId, 0, current.asset.durationSec)
-                  : setBlurRange(current, blurId, sourceStartSec, sourceEndSec),
-              );
+              edit((current) => {
+                const blur = current.blurs.find((item) => item.id === blurId);
+                if (!blur) return current;
+                return scope === "all"
+                  ? setBlurRange(current, blurId, 0, assetOf(current, blur.assetId).durationSec)
+                  : setBlurRange(current, blurId, sourceStartSec, sourceEndSec);
+              });
             }}
             onBlurStyle={(blurId, style) => edit((current) => setBlurStyle(current, blurId, style))}
             onBlurRemove={(blurId) => edit((current) => removeBlur(current, blurId))}
@@ -1040,6 +1181,112 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
         )}
       </div>
     </main>
+  );
+}
+
+type AddVideoPanelProps = {
+  onAdd: (videos: NamedVideo[]) => Promise<void>;
+  onClose: () => void;
+};
+
+// 編集中に動画を足す入口。開始画面と同じく、ファイル・画面の録画・キャプチャ機器から選べる。
+function AddVideoPanel({ onAdd, onClose }: AddVideoPanelProps) {
+  const [busy, setBusy] = useState(false);
+  const [recording, setRecording] = useState<ScreenRecording | null>(null);
+  const [capturing, setCapturing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const add = async (videos: NamedVideo[]) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await onAdd(videos);
+    } catch (cause) {
+      setError(messageOf(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const startRecording = async () => {
+    setError(null);
+    try {
+      const session = await startScreenRecording();
+      setRecording(session);
+      const blob = await session.finished;
+      setRecording(null);
+      await add([{ blob, name: `録画.${extensionFor(session.mimeType)}` }]);
+    } catch (cause) {
+      setRecording(null);
+      // 共有ダイアログのキャンセルはエラーとして扱わない。
+      if (cause instanceof DOMException && cause.name === "NotAllowedError") return;
+      setError(messageOf(cause));
+    }
+  };
+
+  const importFiles = (event: ChangeEvent<HTMLInputElement>) => {
+    const videos = filesOf(event.target.files);
+    event.target.value = "";
+    if (videos.length > 0) void add(videos);
+  };
+
+  return (
+    <section
+      aria-label="動画を追加"
+      className="flex flex-col gap-2 rounded-lg bg-paper-2 px-4 py-3 text-sm"
+    >
+      <p className="text-ink-2">追加した動画は、手順の最後に入ります。並べ替えは手順パネルでできます。</p>
+      {capturing ? (
+        <CapturePanel
+          onCancel={() => setCapturing(false)}
+          onOpen={(blob, name) => add([{ blob, name }])}
+        />
+      ) : recording ? (
+        <div className="flex gap-2">
+          <button type="button" className={PRIMARY} onClick={recording.stop}>
+            録画を止めて追加する
+          </button>
+        </div>
+      ) : (
+        <div className="flex flex-wrap items-center gap-2">
+          <label
+            className={`${BUTTON} cursor-pointer focus-within:outline-2 focus-within:outline-accent ${busy ? "pointer-events-none opacity-50" : ""}`}
+          >
+            {busy ? "読み込み中…" : "ファイルを選ぶ"}
+            <input
+              type="file"
+              accept="video/*"
+              multiple
+              disabled={busy}
+              className="sr-only"
+              onChange={importFiles}
+            />
+          </label>
+          <button type="button" className={BUTTON} disabled={busy} onClick={startRecording}>
+            画面を録画
+          </button>
+          <button
+            type="button"
+            className={BUTTON}
+            disabled={busy}
+            onClick={() => {
+              setError(null);
+              setCapturing(true);
+            }}
+          >
+            キャプチャ機器から録画
+          </button>
+          <button type="button" className={`${BUTTON} ml-auto`} disabled={busy} onClick={onClose}>
+            閉じる
+          </button>
+        </div>
+      )}
+      {error && (
+        <p role="alert" className="text-danger">
+          {error}
+        </p>
+      )}
+    </section>
   );
 }
 

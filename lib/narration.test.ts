@@ -13,7 +13,7 @@ import { setChapter, setClipIncluded, setStepText, splitAt } from "./timeline";
 afterEach(() => vi.unstubAllGlobals());
 
 function doc() {
-  return createDocument({ name: "a", durationSec: 6, width: 1920, height: 1080 });
+  return createDocument([{ id: "a", name: "a", durationSec: 6, width: 1920, height: 1080 }]);
 }
 
 describe("narrationCredit", () => {
