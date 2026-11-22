@@ -164,6 +164,16 @@ export const ZoomIcon = (p: IconProps) => (
     <path d="m20 20-4-4M11 8v6M8 11h6" />
   </Svg>
 );
+export const MinusIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M5 12h14" />
+  </Svg>
+);
+export const PlusIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M12 5v14M5 12h14" />
+  </Svg>
+);
 export const BlurIcon = (p: IconProps) => (
   <Svg {...p}>
     <rect x="3" y="3" width="18" height="18" rx="2" strokeDasharray="3 3" />

@@ -23,17 +23,63 @@ const MIN_MOSAIC_BLOCK = 16;
 
 type Rect = { x: number; y: number; width: number; height: number };
 
-function frameRectOf(doc: DemoDocument, width: number, height: number, vw: number, vh: number) {
+// 余白に置く見出し（チャプター名）と字幕の大きさ。出力の幅に対する比率。
+const HEADER_FONT_RATIO = 0.017;
+const HEADER_BAND_RATIO = 0.045;
+const CAPTION_FONT_RATIO = 0.021;
+const CAPTION_LINE_HEIGHT = 1.4;
+const CAPTION_MAX_LINES = 2;
+const MIN_CAPTION_FONT_SCALE = 0.7;
+const CREDIT_FONT_RATIO = 0.012;
+const FONT_FAMILY = `system-ui, "Hiragino Sans", sans-serif`;
+
+function hasHeader(doc: DemoDocument) {
+  return doc.clips.some((clip) => !clip.hidden && clip.chapter?.title.trim());
+}
+
+function hasCaptions(doc: DemoDocument) {
+  const visible = new Set(doc.clips.filter((clip) => !clip.hidden).map((clip) => clip.id));
+  return doc.captions.some((caption) => visible.has(caption.clipId) && caption.text.trim());
+}
+
+/**
+ * 映像の枠を置く位置。見出しや字幕があるときは、上下の余白にその帯を確保して映像に重ねない。
+ * 帯は動画全体で固定する。字幕の有無で枠が伸び縮みすると、見ている側が追いにくい。
+ * 余白（paddingPct）が帯より広ければ、その内側に収めて映像は小さくしない。
+ */
+function layoutOf(doc: DemoDocument, width: number, height: number, vw: number, vh: number) {
   const padding = (width * doc.look.paddingPct) / 100;
-  const fit = Math.min((width - padding * 2) / vw, (height - padding * 2) / vh);
+  const headerBand = hasHeader(doc) ? width * HEADER_BAND_RATIO : 0;
+  const captionFont = width * CAPTION_FONT_RATIO;
+  const captionBand = hasCaptions(doc)
+    ? captionFont * CAPTION_LINE_HEIGHT * CAPTION_MAX_LINES + captionFont * 1.6
+    : 0;
+  const top = Math.max(padding, headerBand);
+  const bottom = Math.max(padding, captionBand);
+  const fit = Math.min((width - padding * 2) / vw, (height - top - bottom) / vh);
   const frameWidth = vw * fit;
   const frameHeight = vh * fit;
-  return {
+  const frame: Rect = {
     x: (width - frameWidth) / 2,
-    y: (height - frameHeight) / 2,
+    y: top + (height - top - bottom - frameHeight) / 2,
     width: frameWidth,
     height: frameHeight,
   };
+  return { frame, padding, captionFont };
+}
+
+function frameRectOf(doc: DemoDocument, width: number, height: number, vw: number, vh: number) {
+  return layoutOf(doc, width, height, vw, vh).frame;
+}
+
+/** その手順が属するチャプターの名前。直前までで最後にチャプター画面を持つ手順のものを使う。 */
+export function chapterTitleOf(doc: DemoDocument, clipId: string) {
+  let title = "";
+  for (const clip of doc.clips) {
+    if (!clip.hidden && clip.chapter) title = clip.chapter.title.trim();
+    if (clip.id === clipId) return title;
+  }
+  return "";
 }
 
 function cropOf(doc: DemoDocument, clipId: string, sourceSec: number, vw: number, vh: number) {
@@ -99,6 +145,9 @@ export function thumbnailDoc(doc: DemoDocument): DemoDocument {
   return {
     ...doc,
     narration: { ...doc.narration, enabled: false },
+    // 見出しや字幕の帯を取ると映像が小さくなるので、サムネイルには描かない。
+    clips: doc.clips.map((clip) => ({ ...clip, chapter: undefined })),
+    captions: [],
     look: { ...doc.look, paddingPct: 0, radiusPct: 0, shadow: false },
   };
 }
@@ -187,7 +236,8 @@ export function drawFrame(
 
   const videoWidth = video.videoWidth || doc.asset.width;
   const videoHeight = video.videoHeight || doc.asset.height;
-  const frame = frameRectOf(doc, width, height, videoWidth, videoHeight);
+  const layout = layoutOf(doc, width, height, videoWidth, videoHeight);
+  const { frame } = layout;
   const { x: frameX, y: frameY, width: frameWidth, height: frameHeight } = frame;
   const radius = (width * look.radiusPct) / 100;
 
@@ -225,8 +275,11 @@ export function drawFrame(
   }
   ctx.restore();
 
+  const ink = inkOf(doc);
+  const chapterTitle = chapterTitleOf(doc, clipId);
+  if (chapterTitle) drawHeader(ctx, chapterTitle, frame, ink);
   const caption = captionTextAt(doc, clipId, sourceSec)?.trim();
-  if (caption) drawCaption(ctx, caption, frameY + frameHeight);
+  if (caption) drawCaption(ctx, caption, frame, layout, ink);
 
   // 音声の利用条件でクレジットが必須なので、書き忘れないよう動画に入れる。
   const credit = narrationCredit(doc);
@@ -246,10 +299,7 @@ export function drawChapter(ctx: CanvasRenderingContext2D, doc: DemoDocument, ch
   ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, width, height);
 
-  // 明るい背景（紙）だけは文字を暗くして読めるようにする。
-  const light = doc.look.background === "paper";
-  const ink = light ? "#1f1b16" : "#ffffff";
-  const sub = light ? "rgba(31, 27, 22, 0.7)" : "rgba(255, 255, 255, 0.75)";
+  const { ink, sub } = inkOf(doc);
   const titleSize = width * 0.045;
   const noteSize = width * 0.022;
   const maxWidth = width * 0.7;
@@ -309,7 +359,7 @@ export function drawAt(
 
 function drawCredit(ctx: CanvasRenderingContext2D, credit: string) {
   const { width, height } = ctx.canvas;
-  const fontSize = width * 0.012;
+  const fontSize = width * CREDIT_FONT_RATIO;
   ctx.save();
   ctx.font = `500 ${fontSize}px system-ui, "Hiragino Sans", sans-serif`;
   ctx.textAlign = "right";
@@ -331,31 +381,76 @@ function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number)
   return lines;
 }
 
-// ズームの影響を受けないよう、映像の切り抜きとは別に最前面へ描く。
-function drawCaption(ctx: CanvasRenderingContext2D, text: string, frameBottom: number) {
+type Ink = { ink: string; sub: string };
+
+// 背景の上に直接文字を置くので、明るい背景（紙）だけは文字を暗くして読めるようにする。
+function inkOf(doc: DemoDocument): Ink {
+  return doc.look.background === "paper"
+    ? { ink: "#1f1b16", sub: "rgba(31, 27, 22, 0.7)" }
+    : { ink: "#ffffff", sub: "rgba(255, 255, 255, 0.75)" };
+}
+
+// 上の余白に、いまの手順が属するチャプター名を出す。どの話の途中かが分かるようにする。
+function drawHeader(ctx: CanvasRenderingContext2D, title: string, frame: Rect, { sub }: Ink) {
   const { width } = ctx.canvas;
-  const fontSize = width * 0.024;
-  const lineHeight = fontSize * 1.4;
-  const paddingX = fontSize * 0.9;
-  const paddingY = fontSize * 0.5;
+  const fontSize = width * HEADER_FONT_RATIO;
+  const centerY = frame.y / 2;
+  const barWidth = fontSize * 0.25;
 
   ctx.save();
-  ctx.font = `600 ${fontSize}px system-ui, "Hiragino Sans", sans-serif`;
+  ctx.font = `700 ${fontSize}px ${FONT_FAMILY}`;
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  const textX = frame.x + barWidth + fontSize * 0.6;
+  const maxWidth = frame.x + frame.width - textX;
+  let text = title;
+  if (ctx.measureText(text).width > maxWidth) {
+    while (text && ctx.measureText(`${text}…`).width > maxWidth) text = text.slice(0, -1);
+    text = `${text}…`;
+  }
+  ctx.fillStyle = sub;
+  ctx.beginPath();
+  ctx.roundRect(frame.x, centerY - fontSize * 0.6, barWidth, fontSize * 1.2, barWidth / 2);
+  ctx.fill();
+  ctx.fillText(text, textX, centerY);
+  ctx.restore();
+}
+
+// 字幕は映像に重ねず、映像の下の余白に置く。ズームの影響も受けない。
+// 帯に収まらないほど長い文は、文字を小さくして収める。
+function drawCaption(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  frame: Rect,
+  layout: { padding: number; captionFont: number },
+  { ink }: Ink,
+) {
+  const { width, height } = ctx.canvas;
+  const maxWidth = Math.max(frame.width, width - Math.max(layout.padding, width * 0.05) * 2);
+
+  ctx.save();
+  let fontSize = layout.captionFont;
+  let lines: string[] = [];
+  for (;;) {
+    ctx.font = `600 ${fontSize}px ${FONT_FAMILY}`;
+    lines = wrapText(ctx, text, maxWidth);
+    if (lines.length <= CAPTION_MAX_LINES) break;
+    const next = fontSize * 0.92;
+    if (next < layout.captionFont * MIN_CAPTION_FONT_SCALE) break;
+    fontSize = next;
+  }
+  const lineHeight = fontSize * CAPTION_LINE_HEIGHT;
+  const blockHeight = lines.length * lineHeight;
+  // 右下のクレジットと重ならないよう、その高さを除いた範囲の中央に置く。
+  const bandTop = frame.y + frame.height;
+  const bandBottom = height - width * CREDIT_FONT_RATIO * 1.2;
+  const top = bandTop + Math.max(0, (bandBottom - bandTop - blockHeight) / 2);
+
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  const lines = wrapText(ctx, text, width * 0.7);
-  const boxWidth = Math.max(...lines.map((line) => ctx.measureText(line).width)) + paddingX * 2;
-  const boxHeight = lines.length * lineHeight + paddingY * 2;
-  const boxY = frameBottom - boxHeight - fontSize;
-
-  ctx.fillStyle = "rgba(0, 0, 0, 0.72)";
-  ctx.beginPath();
-  ctx.roundRect((width - boxWidth) / 2, boxY, boxWidth, boxHeight, fontSize * 0.4);
-  ctx.fill();
-
-  ctx.fillStyle = "#fff";
+  ctx.fillStyle = ink;
   lines.forEach((line, index) => {
-    ctx.fillText(line, width / 2, boxY + paddingY + lineHeight * (index + 0.5));
+    ctx.fillText(line, width / 2, top + lineHeight * (index + 0.5));
   });
   ctx.restore();
 }

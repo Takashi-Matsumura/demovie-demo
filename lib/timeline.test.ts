@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createDocument, documentSchema, newId, type DemoDocument } from "./document";
-import { mosaicGrid, thumbnailDoc, thumbnailSec } from "./render";
+import { chapterTitleOf, mosaicGrid, thumbnailDoc, thumbnailSec } from "./render";
 import {
   addBlur,
   addCaption,
@@ -398,6 +398,42 @@ describe("thumbnails", () => {
     const plain = thumbnailDoc(doc);
     expect(plain.blurs).toEqual(doc.blurs);
     expect(plain.look.paddingPct).toBe(0);
+  });
+
+  it("drops captions and chapters so the header and caption bands are not reserved", () => {
+    const base = addCaption(makeDoc(), 1);
+    const chapter = { title: "準備", note: "", durationSec: 3 };
+    const doc = setChapter(base, base.clips[0].id, chapter);
+    const plain = thumbnailDoc(doc);
+    expect(plain.captions).toEqual([]);
+    expect(plain.clips[0].chapter).toBeUndefined();
+  });
+});
+
+describe("chapterTitleOf", () => {
+  const chapter = (title: string) => ({ title, note: "", durationSec: 3 });
+
+  it("uses the latest chapter at or before the step", () => {
+    const split = splitAt(splitAt(makeDoc(), 6), 3);
+    const [a, b, c] = split.clips;
+    const doc = setChapter(setChapter(split, b.id, chapter("設定")), c.id, chapter(" 確認 "));
+    expect(chapterTitleOf(doc, a.id)).toBe("");
+    expect(chapterTitleOf(doc, b.id)).toBe("設定");
+    expect(chapterTitleOf(doc, c.id)).toBe("確認");
+  });
+
+  it("ignores chapters on steps left out of the video", () => {
+    const split = splitAt(makeDoc(), 5);
+    const [a, b] = split.clips;
+    const doc = setClipIncluded(setChapter(split, a.id, chapter("準備")), a.id, false);
+    expect(chapterTitleOf(doc, b.id)).toBe("");
+  });
+
+  it("ends the previous chapter when a later chapter has no title", () => {
+    const split = splitAt(makeDoc(), 5);
+    const [a, b] = split.clips;
+    const doc = setChapter(setChapter(split, a.id, chapter("準備")), b.id, chapter(""));
+    expect(chapterTitleOf(doc, b.id)).toBe("");
   });
 });
 

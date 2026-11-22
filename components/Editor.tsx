@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type ChangeEvent,
@@ -69,11 +70,13 @@ import {
   CloseIcon,
   ExportIcon,
   IconButton,
+  MinusIcon,
   NarratedPlayIcon,
   PanelLeftIcon,
   PanelRightIcon,
   PauseIcon,
   PlayIcon,
+  PlusIcon,
   RedoIcon,
   SceneSplitIcon,
   SparkleIcon,
@@ -370,6 +373,8 @@ type DragBox = {
 };
 
 const MIN_BLUR_SIZE = 0.01;
+// プレビューの表示倍率。1 は画面に収まる大きさ。細部を見るときは拡大してスクロールする。
+const PREVIEW_SCALES = [0.5, 0.75, 1, 1.25, 1.5, 2, 3] as const;
 const END_MARGIN_SEC = 0.05;
 
 type CaptionState =
@@ -407,6 +412,10 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
   const [inspectorOpen, setInspectorOpen] = useState(true);
   const [blurring, setBlurring] = useState(false);
   const [dragBox, setDragBox] = useState<DragBox | null>(null);
+  const [previewScale, setPreviewScale] = useState(1);
+  const previewScrollRef = useRef<HTMLDivElement>(null);
+  // 倍率を変えても、見ていた場所が表示の中央に残るようにする。
+  const previewCenterRef = useRef<{ x: number; y: number } | null>(null);
   const thumbnailOf = useThumbnails(doc, source.url);
   const { speak, error: speechError } = useSpeech();
   const [saveFailed, setSaveFailed] = useState(false);
@@ -506,6 +515,45 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
       }
     }
   };
+
+  const zoomPreview = useCallback((direction: -1 | 0 | 1) => {
+    const el = previewScrollRef.current;
+    if (el) {
+      previewCenterRef.current = {
+        x: (el.scrollLeft + el.clientWidth / 2) / el.scrollWidth,
+        y: (el.scrollTop + el.clientHeight / 2) / el.scrollHeight,
+      };
+    }
+    setPreviewScale((scale) => {
+      if (direction === 0) return 1;
+      const index = PREVIEW_SCALES.findIndex((value) => value >= scale);
+      const next = Math.min(Math.max(index + direction, 0), PREVIEW_SCALES.length - 1);
+      return PREVIEW_SCALES[next];
+    });
+  }, []);
+
+  useLayoutEffect(() => {
+    const el = previewScrollRef.current;
+    const center = previewCenterRef.current;
+    previewCenterRef.current = null;
+    if (!el || !center) return;
+    el.scrollLeft = center.x * el.scrollWidth - el.clientWidth / 2;
+    el.scrollTop = center.y * el.scrollHeight - el.clientHeight / 2;
+  }, [previewScale]);
+
+  // ⌘ / Ctrl + ホイールで拡大縮小する。ブラウザ自体のズームを止めるため passive にしない。
+  useEffect(() => {
+    const el = previewScrollRef.current;
+    if (!el) return;
+    const onWheel = (event: WheelEvent) => {
+      if (!event.ctrlKey && !event.metaKey) return;
+      event.preventDefault();
+      if (Math.abs(event.deltaY) < 1) return;
+      zoomPreview(event.deltaY < 0 ? 1 : -1);
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [zoomPreview]);
 
   // canvas は object-contain なので、表示領域の余白を除いた実際の描画位置から変換する。
   const pointOf = (event: PointerEvent<HTMLElement>) => {
@@ -717,40 +765,49 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
             </p>
           )}
           <div
-            className={`relative touch-none ${blurring ? "cursor-crosshair select-none" : ""}`}
-            onPointerDown={(event) => {
-              if (!blurring) return;
-              event.currentTarget.setPointerCapture(event.pointerId);
-              const { left, top, canvasX, canvasY } = pointOf(event);
-              setDragBox({ canvasX, canvasY, startLeft: left, startTop: top, left, top });
-            }}
-            onPointerMove={(event) => {
-              if (!dragBox) return;
-              const { left, top } = pointOf(event);
-              setDragBox({ ...dragBox, left, top });
-            }}
-            onPointerUp={finishBlur}
-            onPointerCancel={() => setDragBox(null)}
+            ref={previewScrollRef}
+            className="max-h-[max(calc(100dvh-17rem),16rem)] overflow-auto rounded-lg"
           >
-            <canvas
-              ref={canvasRef}
-              width={OUTPUT_WIDTH}
-              height={OUTPUT_HEIGHT}
-              aria-label="プレビュー"
-              className="block aspect-video max-h-[calc(100dvh-17rem)] w-full rounded-lg object-contain lg:min-h-64"
-            />
-            {dragBox && (
-              <div
-                aria-hidden
-                className="pointer-events-none absolute border-2 border-accent"
-                style={{
-                  left: Math.min(dragBox.startLeft, dragBox.left),
-                  top: Math.min(dragBox.startTop, dragBox.top),
-                  width: Math.abs(dragBox.left - dragBox.startLeft),
-                  height: Math.abs(dragBox.top - dragBox.startTop),
-                }}
+            <div
+              className={`relative mx-auto touch-none ${blurring ? "cursor-crosshair select-none" : ""}`}
+              // 倍率 1 で表示領域に収まる幅（横幅か高さのどちらか狭いほう）を基準にする。
+              style={{
+                width: `calc(min(100%, max(100dvh - 17rem, 16rem) * 16 / 9) * ${previewScale})`,
+              }}
+              onPointerDown={(event) => {
+                if (!blurring) return;
+                event.currentTarget.setPointerCapture(event.pointerId);
+                const { left, top, canvasX, canvasY } = pointOf(event);
+                setDragBox({ canvasX, canvasY, startLeft: left, startTop: top, left, top });
+              }}
+              onPointerMove={(event) => {
+                if (!dragBox) return;
+                const { left, top } = pointOf(event);
+                setDragBox({ ...dragBox, left, top });
+              }}
+              onPointerUp={finishBlur}
+              onPointerCancel={() => setDragBox(null)}
+            >
+              <canvas
+                ref={canvasRef}
+                width={OUTPUT_WIDTH}
+                height={OUTPUT_HEIGHT}
+                aria-label="プレビュー"
+                className="block aspect-video w-full rounded-lg object-contain"
               />
-            )}
+              {dragBox && (
+                <div
+                  aria-hidden
+                  className="pointer-events-none absolute border-2 border-accent"
+                  style={{
+                    left: Math.min(dragBox.startLeft, dragBox.left),
+                    top: Math.min(dragBox.startTop, dragBox.top),
+                    width: Math.abs(dragBox.left - dragBox.startLeft),
+                    height: Math.abs(dragBox.top - dragBox.startTop),
+                  }}
+                />
+              )}
+            </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
@@ -774,6 +831,36 @@ function Workspace({ doc, source, canUndo, canRedo, edit, undo, redo, onClose }:
             <span className="font-mono text-sm text-ink-2 tabular-nums">
               {formatTime(timeSec)} / {formatTime(totalDuration(doc))}
             </span>
+            <div className="flex items-center gap-0.5" role="group" aria-label="プレビューの大きさ">
+              <IconButton
+                label="プレビューを縮小"
+                hint="⌘ + ホイール"
+                tone="quiet"
+                size="sm"
+                disabled={previewScale <= PREVIEW_SCALES[0]}
+                onClick={() => zoomPreview(-1)}
+              >
+                <MinusIcon className="size-3.5" />
+              </IconButton>
+              <button
+                type="button"
+                title="画面に合わせる"
+                onClick={() => zoomPreview(0)}
+                className="min-w-12 rounded px-1 font-mono text-xs text-ink-2 tabular-nums hover:bg-rule hover:text-ink"
+              >
+                {Math.round(previewScale * 100)}%
+              </button>
+              <IconButton
+                label="プレビューを拡大"
+                hint="⌘ + ホイール"
+                tone="quiet"
+                size="sm"
+                disabled={previewScale >= PREVIEW_SCALES[PREVIEW_SCALES.length - 1]}
+                onClick={() => zoomPreview(1)}
+              >
+                <PlusIcon className="size-3.5" />
+              </IconButton>
+            </div>
             <div className="ml-auto flex flex-wrap gap-1">
               <IconButton
                 label="画面の変化で手順を分ける"
