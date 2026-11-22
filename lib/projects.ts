@@ -60,7 +60,16 @@ async function withStores<T>(
   });
 }
 
-function summaryOf({ id, updatedAt, doc }: ProjectRecord): ProjectSummary {
+/**
+ * 一覧に出す要約。保存データは古い版のこともあるので、開くときと同じく新しい形へ直してから読む。
+ * 読めない保存データがあっても一覧全体は壊さず、削除できるよう名前だけ出す。
+ */
+export function summaryOf({ id, updatedAt, doc: raw }: { id: string; updatedAt: number; doc: unknown }): ProjectSummary {
+  const parsed = documentSchema.safeParse(raw);
+  if (!parsed.success) {
+    return { id, updatedAt, name: "（読み込めない作業）", durationSec: 0, stepCount: 0 };
+  }
+  const doc = parsed.data;
   return {
     id,
     updatedAt,
