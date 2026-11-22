@@ -4,6 +4,7 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type ChangeEvent,
@@ -19,6 +20,7 @@ import {
   type DemoDocument,
 } from "@/lib/document";
 import { defaultExportAudio, exportVideo, type ExportAudio } from "@/lib/export";
+import { ensurePermission, pickFolder, readFolder, saveToFolder } from "@/lib/folder";
 import { formatTime } from "@/lib/format";
 import {
   extensionFor,
@@ -32,9 +34,12 @@ import {
   addProjectVideos,
   createProject,
   deleteProject,
+  folderOf,
   listProjects,
   loadProject,
+  rememberFolder,
   saveProject,
+  storedProject,
   type ProjectSummary,
 } from "@/lib/projects";
 import { OUTPUT_HEIGHT, OUTPUT_WIDTH, previewToVideo } from "@/lib/render";
@@ -94,6 +99,7 @@ import {
   StopIcon,
   TuneIcon,
   UndoIcon,
+  FolderSaveIcon,
   VideoAddIcon,
   ZoomIcon,
 } from "./IconButton";
@@ -118,6 +124,16 @@ const PRIMARY =
 
 /** urls は動画（asset）の ID ごとの再生用 URL。動画を足すと増える。 */
 type Source = { projectId: string; urls: VideoSources };
+
+/**
+ * 作業を保存するフォルダ。savedJson はそのフォルダへ最後に保存した（または読み込んだ）作業内容で、
+ * 今の作業と比べて未保存の変更があるかを出す。開き直したばかりで分からないときは null。
+ */
+type ProjectFolder = { handle: FileSystemDirectoryHandle; savedJson: string | null };
+
+export type FolderStatus =
+  | { tone: "idle" }
+  | { tone: "busy" | "done" | "failed"; message: string };
 
 /** 読み込む動画。name は元のファイル名などの表示名。 */
 type NamedVideo = { blob: Blob; name: string };
@@ -162,6 +178,20 @@ export function Editor() {
   const [error, setError] = useState<string | null>(null);
   // 作った URL は、プロジェクトを閉じるまで使い続ける。元に戻すで消えた動画も、やり直すで戻るため。
   const urlsRef = useRef<VideoSources>({});
+  const [folder, setFolder] = useState<ProjectFolder | null>(null);
+  const [folderStatus, setFolderStatus] = useState<FolderStatus>({ tone: "idle" });
+
+  const openStored = useCallback(
+    (projectId: string, saved: DemoDocument, videos: { id: string; blob: Blob }[]) => {
+      load(saved);
+      urlsRef.current = Object.fromEntries(
+        videos.map(({ id, blob }) => [id, URL.createObjectURL(blob)]),
+      );
+      setSource({ projectId, urls: urlsRef.current });
+      setError(null);
+    },
+    [load],
+  );
 
   const openVideos = useCallback(
     async (videos: NamedVideo[]) => {
@@ -177,6 +207,8 @@ export function Editor() {
         load(created);
         urlsRef.current = urlsOf(prepared);
         setSource({ projectId, urls: urlsRef.current });
+        setFolder(null);
+        setFolderStatus({ tone: "idle" });
         setError(null);
       } catch (cause) {
         setError(messageOf(cause));
@@ -189,17 +221,80 @@ export function Editor() {
     async (projectId: string) => {
       try {
         const { doc: saved, videos } = await loadProject(projectId);
-        load(saved);
-        urlsRef.current = Object.fromEntries(
-          videos.map(({ id, blob }) => [id, URL.createObjectURL(blob)]),
-        );
-        setSource({ projectId, urls: urlsRef.current });
-        setError(null);
+        const handle = await folderOf(projectId).catch(() => null);
+        openStored(projectId, saved, videos);
+        setFolder(handle ? { handle, savedJson: null } : null);
+        setFolderStatus({ tone: "idle" });
       } catch (cause) {
         setError(messageOf(cause));
       }
     },
-    [load],
+    [openStored],
+  );
+
+  // フォルダに保存した作業を開き直す。保存領域へ取り込んでから開くので、あとは普段どおり自動保存される。
+  const openFolder = useCallback(async () => {
+    try {
+      const handle = await pickFolder("read");
+      if (!handle) return;
+      const { manifest, videos } = await readFolder(handle);
+      const local = await storedProject(manifest.projectId).catch(() => null);
+      // ブラウザ側にフォルダより新しい別の変更が残っていたら、上書きせず別の作業として開く。
+      const keepLocal =
+        local !== null &&
+        JSON.stringify(local.doc) !== JSON.stringify(manifest.doc) &&
+        local.updatedAt > manifest.savedAt;
+      const projectId = keepLocal ? newId() : manifest.projectId;
+      if (local && !keepLocal) await deleteProject(projectId);
+      await createProject(projectId, manifest.doc, videos, manifest.savedAt);
+      if (!keepLocal) await rememberFolder(projectId, handle).catch(() => undefined);
+      openStored(projectId, manifest.doc, videos);
+      setFolder(keepLocal ? null : { handle, savedJson: JSON.stringify(manifest.doc) });
+      setFolderStatus(
+        keepLocal
+          ? {
+              tone: "done",
+              message: `ブラウザに「${handle.name}」より新しい変更が残っていたため、フォルダの内容は別の作業として開きました。保存するときは新しいフォルダを選んでください。`,
+            }
+          : { tone: "done", message: `フォルダ「${handle.name}」から開きました。` },
+      );
+    } catch (cause) {
+      setError(messageOf(cause));
+    }
+  }, [openStored]);
+
+  // 作業と動画をフォルダにまとめて保存する。2 回目からは同じフォルダへ上書きする。
+  const saveFolder = useCallback(
+    async (changeFolder: boolean) => {
+      if (!doc || !source) return;
+      const snapshot = doc;
+      try {
+        const handle =
+          !changeFolder && folder ? folder.handle : await pickFolder("readwrite");
+        if (!handle) return;
+        if (!(await ensurePermission(handle, "readwrite"))) {
+          throw new Error("フォルダへの書き込みが許可されませんでした。");
+        }
+        setFolderStatus({ tone: "busy", message: "フォルダに保存中…" });
+        await saveToFolder(
+          handle,
+          source.projectId,
+          snapshot,
+          async (assetId) => {
+            const url = source.urls[assetId];
+            if (!url) throw new Error("動画が見つかりませんでした。");
+            return (await fetch(url)).blob();
+          },
+          (message) => setFolderStatus({ tone: "busy", message }),
+        );
+        await rememberFolder(source.projectId, handle).catch(() => undefined);
+        setFolder({ handle, savedJson: JSON.stringify(snapshot) });
+        setFolderStatus({ tone: "done", message: `フォルダ「${handle.name}」に保存しました。` });
+      } catch (cause) {
+        setFolderStatus({ tone: "failed", message: `フォルダに保存できませんでした。${messageOf(cause)}` });
+      }
+    },
+    [doc, folder, source],
   );
 
   // 編集中に動画を足す。足した動画は 1 つの手順として末尾に入る。元に戻すで取り消せる。
@@ -228,7 +323,15 @@ export function Editor() {
   }, [projectId]);
 
   if (!doc || !source) {
-    return <StartScreen error={error} onError={setError} onOpen={openVideos} onResume={resume} />;
+    return (
+      <StartScreen
+        error={error}
+        onError={setError}
+        onOpen={openVideos}
+        onOpenFolder={openFolder}
+        onResume={resume}
+      />
+    );
   }
 
   return (
@@ -241,9 +344,14 @@ export function Editor() {
       undo={undo}
       redo={redo}
       onAddVideos={addVideos}
+      folder={folder && { name: folder.handle.name, savedJson: folder.savedJson }}
+      folderStatus={folderStatus}
+      onSaveFolder={saveFolder}
       onClose={() => {
         reset();
         setSource(null);
+        setFolder(null);
+        setFolderStatus({ tone: "idle" });
       }}
     />
   );
@@ -253,10 +361,11 @@ type StartScreenProps = {
   error: string | null;
   onError: (message: string | null) => void;
   onOpen: (videos: NamedVideo[]) => Promise<void>;
+  onOpenFolder: () => Promise<void>;
   onResume: (projectId: string) => Promise<void>;
 };
 
-function StartScreen({ error, onError, onOpen, onResume }: StartScreenProps) {
+function StartScreen({ error, onError, onOpen, onOpenFolder, onResume }: StartScreenProps) {
   const [busy, setBusy] = useState<"sample" | null>(null);
   const [recording, setRecording] = useState<ScreenRecording | null>(null);
   const [capturing, setCapturing] = useState(false);
@@ -350,6 +459,17 @@ function StartScreen({ error, onError, onOpen, onResume }: StartScreenProps) {
                 onChange={importFiles}
               />
             </label>
+            <button
+              type="button"
+              className={BUTTON}
+              disabled={busy !== null}
+              onClick={() => {
+                onError(null);
+                void onOpenFolder();
+              }}
+            >
+              フォルダから開く
+            </button>
             <button
               type="button"
               className={BUTTON}
@@ -479,6 +599,10 @@ type WorkspaceProps = {
   undo: () => void;
   redo: () => void;
   onAddVideos: (videos: NamedVideo[]) => Promise<void>;
+  /** 作業を保存したフォルダ。まだ保存していなければ null。 */
+  folder: { name: string; savedJson: string | null } | null;
+  folderStatus: FolderStatus;
+  onSaveFolder: (changeFolder: boolean) => Promise<void>;
   onClose: () => void;
 };
 
@@ -491,6 +615,9 @@ function Workspace({
   undo,
   redo,
   onAddVideos,
+  folder,
+  folderStatus,
+  onSaveFolder,
   onClose,
 }: WorkspaceProps) {
   // 動画（asset）の ID ごとの <video>。再生位置の手順の動画を使う。
@@ -519,6 +646,9 @@ function Workspace({
   const [adding, setAdding] = useState(false);
   const { speak, error: speechError } = useSpeech();
   const [saveFailed, setSaveFailed] = useState(false);
+  // フォルダへ最後に保存したときから作業が変わっているか。開き直したばかりで分からなければ null。
+  const docJson = useMemo(() => JSON.stringify(doc), [doc]);
+  const folderDirty = folder?.savedJson == null ? null : folder.savedJson !== docJson;
 
   // 動画に含めない手順は再生位置に乗らないので、選んだときだけ覚えておく。
   // 止まったままその手順の入る位置にいる間だけ有効で、再生や移動をすると再生位置の手順に戻る。
@@ -803,7 +933,35 @@ function Workspace({
           className={`mr-auto text-xs ${saveFailed ? "text-danger" : "text-ink-2"}`}
         >
           {saveFailed ? "保存できませんでした" : "自動保存"}
+          {folder && (
+            <>
+              {" · "}
+              <span className={folderDirty ? "text-accent" : undefined}>
+                {folderDirty === null
+                  ? `保存先: ${folder.name}`
+                  : folderDirty
+                    ? `「${folder.name}」に未保存の変更あり`
+                    : `「${folder.name}」に保存済み`}
+              </span>
+              <button
+                type="button"
+                className="ml-2 rounded px-1 underline-offset-2 hover:underline disabled:opacity-50"
+                disabled={folderStatus.tone === "busy" || exporting}
+                onClick={() => void onSaveFolder(true)}
+              >
+                保存先を変える
+              </button>
+            </>
+          )}
         </span>
+        <IconButton
+          label={folder ? `フォルダ「${folder.name}」に保存` : "フォルダに保存"}
+          tone={folderDirty ? "default" : "quiet"}
+          disabled={folderStatus.tone === "busy" || exporting}
+          onClick={() => void onSaveFolder(false)}
+        >
+          {folderStatus.tone === "busy" ? <SpinnerIcon /> : <FolderSaveIcon />}
+        </IconButton>
         <IconButton
           label="動画を追加"
           aria-expanded={adding}
@@ -867,6 +1025,14 @@ function Workspace({
           }}
           onClose={() => setAdding(false)}
         />
+      )}
+      {folderStatus.tone !== "idle" && (
+        <p
+          role={folderStatus.tone === "failed" ? "alert" : "status"}
+          className={`text-sm ${folderStatus.tone === "failed" ? "text-danger" : "text-ink-2"}`}
+        >
+          {folderStatus.message}
+        </p>
       )}
       <ExportStatus state={exportState} />
       <CaptionStatus state={captionState} />

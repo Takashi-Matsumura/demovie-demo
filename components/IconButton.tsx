@@ -164,6 +164,12 @@ export const ZoomIcon = (p: IconProps) => (
     <path d="m20 20-4-4M11 8v6M8 11h6" />
   </Svg>
 );
+export const FolderSaveIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+    <path d="M12 10v6M9 13l3 3 3-3" />
+  </Svg>
+);
 export const VideoAddIcon = (p: IconProps) => (
   <Svg {...p}>
     <rect x="2" y="6" width="14" height="12" rx="2" />
