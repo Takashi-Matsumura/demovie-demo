@@ -1,0 +1,13 @@
+services:
+  app:
+    # 接続先（LLM / Vision / VOICEVOX / Whisper）を既定の 127.0.0.1 から変えるときは、
+    # build.args に NEXT_PUBLIC_*_URL を追加してビルドし直す（ブラウザ向けコードに埋め込まれるため）。
+    build: .
+    container_name: demovie-demo
+    ports:
+      - "8063:3000"
+    environment:
+      # localhost 以外のアドレスで開くときに設定する（例: http://192.168.1.10:8063）
+      APP_ORIGIN: ${APP_ORIGIN:-}
+      TYPESAFE_API_KEY: ${TYPESAFE_API_KEY:-}
+    restart: unless-stopped
