@@ -89,24 +89,51 @@ http://localhost:3000 を開きます。
 
 ### Docker で起動する
 
-Docker と docker compose（または `docker-compose`）があれば、Node.js を入れずに本番ビルドで動かせます。
+Docker と docker compose（または `docker-compose`）があれば、Node.js を入れずに本番ビルドで動かせます。アプリの前に [Caddy](https://caddyserver.com/) を置き、HTTPS で公開します。
 
 ```bash
 docker compose up -d --build
 ```
 
-http://localhost:8063 を開きます。止めるときは `docker compose down` です。ポートを変える場合は `docker-compose.yml` の `"8063:3000"` の左側を書き換えます。
+https://localhost:8063 を開きます（`http://` で開いても `https://` へ転送します）。止めるときは `docker compose down` です。ポートを変える場合は、`docker-compose.yml` の `"8063:8063"` と `Caddyfile` の `https_port` を書き換えます。
 
-AI のサーバ（`llama-server`、`whisper-server`、VOICEVOX）はコンテナに含まれません。下記の各節のとおりホスト側で起動してください。アプリはブラウザから直接これらを呼ぶので、接続先はブラウザから見たアドレスになります。同じ PC のブラウザで開くなら既定の `127.0.0.1` のままで動きます。
+AI のサーバ（`llama-server`、`whisper-server`、VOICEVOX）はコンテナに含まれません。下記の各節のとおりホスト側で起動してください。Caddy が同じオリジンの `/ai/llm`、`/ai/vision`、`/ai/whisper`、`/ai/voicevox` からホストの各サーバへ中継するので、別の PC のブラウザからも使えます。AI のサーバは `127.0.0.1` で待ち受けたままで構いません。
 
-接続先を変える場合は、`docker-compose.yml` と同じフォルダの `.env` に書きます。`NEXT_PUBLIC_` の値はビルド時に埋め込まれるので、変えたら `--build` を付けて作り直してください。
+#### 別の PC から使う
+
+画面録画、カメラやマイク、フォルダへの保存は、ブラウザが HTTPS（または `localhost`）のページでしか使わせません。`http://<IP アドレス>` で開くと「サンプルで試す」なども動かないので、HTTPS で開きます。
+
+`docker-compose.yml` と同じフォルダの `.env` に、このマシンの IP アドレスを書いて起動し直します。
+
+```bash
+DEMOVIE_HOSTS=localhost, 192.168.1.10
+DEMOVIE_DEFAULT_SNI=192.168.1.10
+APP_ORIGIN=https://192.168.1.10:8063
+```
+
+別の PC からは https://192.168.1.10:8063 を開きます。証明書は Caddy が作るローカルの認証局で発行するので、そのままでは警告が出ます。警告をなくすには、https://192.168.1.10:8063/demovie-ca.crt からルート証明書をダウンロードし、各 PC で信頼済みのルート証明書として登録します（macOS はキーチェーンアクセスで「常に信頼」、Windows は「信頼されたルート証明機関」）。ルート証明書は Docker のボリューム `caddy_data` に保存され、`docker compose down -v` で消さない限り作り直されません。
+
+IP アドレスが変わったら `.env` を書き換えて `docker compose up -d` で起動し直してください。
+
+#### 接続先を変える
+
+ホスト側の AI サーバのポートが既定と違う場合は、`.env` で中継先を変えます。こちらは起動し直すだけで反映されます。
 
 ```bash
 # 例: whisper-server を 8178 で動かしている場合
-NEXT_PUBLIC_WHISPER_URL=http://127.0.0.1:8178
+WHISPER_UPSTREAM=host.docker.internal:8178
 ```
 
-独り言の判定を使う場合は、同じ `.env` に `TYPESAFE_API_KEY` を書きます。こちらは実行時に読むので、`docker compose up -d` で反映されます。`localhost` 以外のアドレスで開く場合は `APP_ORIGIN`（例: `http://192.168.1.10:8063`）も設定してください。ただし、画面録画は `localhost` か HTTPS でしか使えません。
+| 中継先の環境変数 | 既定値 |
+|---|---|
+| `LLM_UPSTREAM` | `host.docker.internal:8080` |
+| `VISION_UPSTREAM` | `host.docker.internal:8084` |
+| `WHISPER_UPSTREAM` | `host.docker.internal:8090` |
+| `VOICEVOX_UPSTREAM` | `host.docker.internal:50021` |
+
+Caddy を通さずに別のサーバを直接呼ぶ場合は `NEXT_PUBLIC_*_URL` を指定します。ビルド時に埋め込まれるので `--build` を付けて作り直してください。
+
+独り言の判定を使う場合は、同じ `.env` に `TYPESAFE_API_KEY` を書きます。`/api/intent` は `APP_ORIGIN` のオリジンからの呼び出しだけを受け付けます。
 
 ### AI による手順の作成
 
