@@ -3,17 +3,52 @@ services:
     build:
       context: .
       # ブラウザから呼ぶ AI サーバの接続先。ビルド時に埋め込まれるので、変えたら --build で作り直す。
-      # 未指定なら既定値（127.0.0.1 の 8080 / 8084 / 50021 / 8090）を使う。
+      # 既定では proxy（Caddy）の /ai/* を経由し、別 PC のブラウザからも同じオリジンで呼べるようにする。
       args:
-        NEXT_PUBLIC_LLM_URL: ${NEXT_PUBLIC_LLM_URL:-}
-        NEXT_PUBLIC_VISION_URL: ${NEXT_PUBLIC_VISION_URL:-}
-        NEXT_PUBLIC_VOICEVOX_URL: ${NEXT_PUBLIC_VOICEVOX_URL:-}
-        NEXT_PUBLIC_WHISPER_URL: ${NEXT_PUBLIC_WHISPER_URL:-}
+        NEXT_PUBLIC_LLM_URL: ${NEXT_PUBLIC_LLM_URL:-/ai/llm}
+        NEXT_PUBLIC_VISION_URL: ${NEXT_PUBLIC_VISION_URL:-/ai/vision}
+        NEXT_PUBLIC_VOICEVOX_URL: ${NEXT_PUBLIC_VOICEVOX_URL:-/ai/voicevox}
+        NEXT_PUBLIC_WHISPER_URL: ${NEXT_PUBLIC_WHISPER_URL:-/ai/whisper}
     container_name: demovie-demo
-    ports:
-      - "8063:3000"
+    expose:
+      - "3000"
     environment:
-      # localhost 以外のアドレスで開くときに設定する（例: http://192.168.1.10:8063）
+      # 独り言の判定（/api/intent）を受け付けるオリジン。例: https://192.168.1.10:8063
       APP_ORIGIN: ${APP_ORIGIN:-}
       TYPESAFE_API_KEY: ${TYPESAFE_API_KEY:-}
     restart: unless-stopped
+
+  proxy:
+    image: caddy:2.10-alpine
+    container_name: demovie-proxy
+    depends_on:
+      - app
+    ports:
+      - "8063:8063"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # ルート証明書を作り直さないよう永続化する（作り直すと別 PC で入れ直しが必要）
+      - caddy_data:/data
+      - caddy_config:/config
+    environment:
+      # 証明書を発行するホスト名・IP（カンマ区切り）。例: localhost, 192.168.1.10
+      DEMOVIE_HOSTS: ${DEMOVIE_HOSTS:-localhost}
+      # IP アドレスで開くとき（SNI なし）に使う証明書のホスト。例: 192.168.1.10
+      DEMOVIE_DEFAULT_SNI: ${DEMOVIE_DEFAULT_SNI:-localhost}
+      # AI サーバの中継先（Docker から見たホスト）
+      LLM_UPSTREAM: ${LLM_UPSTREAM:-host.docker.internal:8080}
+      VISION_UPSTREAM: ${VISION_UPSTREAM:-host.docker.internal:8084}
+      WHISPER_UPSTREAM: ${WHISPER_UPSTREAM:-host.docker.internal:8090}
+      VOICEVOX_UPSTREAM: ${VOICEVOX_UPSTREAM:-host.docker.internal:50021}
+      # Docker の proxy 設定が入っていると app への中継まで proxy 経由になるので無効にする
+      HTTP_PROXY: ""
+      HTTPS_PROXY: ""
+      http_proxy: ""
+      https_proxy: ""
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:

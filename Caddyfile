@@ -1,0 +1,60 @@
+# Demovie を HTTPS で公開するリバースプロキシ。
+# 画面録画やフォルダ保存は HTTPS（または localhost）でしか使えないため、LAN 内の別 PC からは HTTPS で開く必要がある。
+# AI サーバもブラウザから直接呼ぶので、同じオリジンの /ai/* に中継して混在コンテンツと CORS を避ける。
+{
+	https_port 8063
+	auto_https disable_redirects
+	skip_install_trust
+	# IP アドレスで開くとブラウザは SNI を送らない。コンテナ内では宛先 IP でも証明書を選べないので既定名を決めておく。
+	default_sni {$DEMOVIE_DEFAULT_SNI:localhost}
+	servers {
+		# 同じポートに http:// で来たら https:// へ転送する
+		listener_wrappers {
+			http_redirect
+			tls
+		}
+	}
+}
+
+(ai_upstream) {
+	# 同一オリジンの中継なので Origin は不要。VOICEVOX などがオリジンで弾かないよう外す。
+	header_up -Origin
+	flush_interval -1
+}
+
+{$DEMOVIE_HOSTS:localhost} {
+	tls internal
+
+	handle_path /ai/llm/* {
+		reverse_proxy {$LLM_UPSTREAM:host.docker.internal:8080} {
+			import ai_upstream
+		}
+	}
+	handle_path /ai/vision/* {
+		reverse_proxy {$VISION_UPSTREAM:host.docker.internal:8084} {
+			import ai_upstream
+		}
+	}
+	handle_path /ai/whisper/* {
+		reverse_proxy {$WHISPER_UPSTREAM:host.docker.internal:8090} {
+			import ai_upstream
+		}
+	}
+	handle_path /ai/voicevox/* {
+		reverse_proxy {$VOICEVOX_UPSTREAM:host.docker.internal:50021} {
+			import ai_upstream
+		}
+	}
+
+	# 別 PC に入れてもらうためのルート証明書（公開鍵のみ）
+	handle /demovie-ca.crt {
+		root * /data/caddy/pki/authorities/local
+		rewrite * /root.crt
+		header Content-Type application/x-x509-ca-cert
+		file_server
+	}
+
+	handle {
+		reverse_proxy app:3000
+	}
+}
