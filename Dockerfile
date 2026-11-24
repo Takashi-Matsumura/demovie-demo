@@ -7,7 +7,8 @@ RUN npm ci
 
 FROM node:24-alpine AS builder
 WORKDIR /app
-# NEXT_PUBLIC_* はビルド時にブラウザ向けコードへ埋め込まれる。未指定ならアプリの既定値（127.0.0.1）を使う。
+# NEXT_PUBLIC_* はビルド時にブラウザ向けコードへ埋め込まれる。
+# 空文字のままだとアプリの既定値（127.0.0.1 の各ポート）が効かないので、空なら unset してからビルドする。
 ARG NEXT_PUBLIC_LLM_URL
 ARG NEXT_PUBLIC_VISION_URL
 ARG NEXT_PUBLIC_VOICEVOX_URL
@@ -15,7 +16,10 @@ ARG NEXT_PUBLIC_WHISPER_URL
 ENV NEXT_TELEMETRY_DISABLED=1
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-RUN npm run build
+RUN for v in NEXT_PUBLIC_LLM_URL NEXT_PUBLIC_VISION_URL NEXT_PUBLIC_VOICEVOX_URL NEXT_PUBLIC_WHISPER_URL; do \
+      eval "[ -n \"\${$v}\" ] || unset $v"; \
+    done; \
+    npm run build
 
 FROM node:24-alpine AS runner
 WORKDIR /app

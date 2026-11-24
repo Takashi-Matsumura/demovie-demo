@@ -1,8 +1,14 @@
 services:
   app:
-    # 接続先（LLM / Vision / VOICEVOX / Whisper）を既定の 127.0.0.1 から変えるときは、
-    # build.args に NEXT_PUBLIC_*_URL を追加してビルドし直す（ブラウザ向けコードに埋め込まれるため）。
-    build: .
+    build:
+      context: .
+      # ブラウザから呼ぶ AI サーバの接続先。ビルド時に埋め込まれるので、変えたら --build で作り直す。
+      # 未指定なら既定値（127.0.0.1 の 8080 / 8084 / 50021 / 8090）を使う。
+      args:
+        NEXT_PUBLIC_LLM_URL: ${NEXT_PUBLIC_LLM_URL:-}
+        NEXT_PUBLIC_VISION_URL: ${NEXT_PUBLIC_VISION_URL:-}
+        NEXT_PUBLIC_VOICEVOX_URL: ${NEXT_PUBLIC_VOICEVOX_URL:-}
+        NEXT_PUBLIC_WHISPER_URL: ${NEXT_PUBLIC_WHISPER_URL:-}
     container_name: demovie-demo
     ports:
       - "8063:3000"
