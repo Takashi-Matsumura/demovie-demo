@@ -87,6 +87,27 @@ http://localhost:3000 を開きます。
 
 画面録画は `localhost` か HTTPS で開いたときだけ使えます。
 
+### Docker で起動する
+
+Docker と docker compose（または `docker-compose`）があれば、Node.js を入れずに本番ビルドで動かせます。
+
+```bash
+docker compose up -d --build
+```
+
+http://localhost:8063 を開きます。止めるときは `docker compose down` です。ポートを変える場合は `docker-compose.yml` の `"8063:3000"` の左側を書き換えます。
+
+AI のサーバ（`llama-server`、`whisper-server`、VOICEVOX）はコンテナに含まれません。下記の各節のとおりホスト側で起動してください。アプリはブラウザから直接これらを呼ぶので、接続先はブラウザから見たアドレスになります。同じ PC のブラウザで開くなら既定の `127.0.0.1` のままで動きます。
+
+接続先を変える場合は、`docker-compose.yml` と同じフォルダの `.env` に書きます。`NEXT_PUBLIC_` の値はビルド時に埋め込まれるので、変えたら `--build` を付けて作り直してください。
+
+```bash
+# 例: whisper-server を 8178 で動かしている場合
+NEXT_PUBLIC_WHISPER_URL=http://127.0.0.1:8178
+```
+
+独り言の判定を使う場合は、同じ `.env` に `TYPESAFE_API_KEY` を書きます。こちらは実行時に読むので、`docker compose up -d` で反映されます。`localhost` 以外のアドレスで開く場合は `APP_ORIGIN`（例: `http://192.168.1.10:8063`）も設定してください。ただし、画面録画は `localhost` か HTTPS でしか使えません。
+
 ### AI による手順の作成
 
 画像入力に対応したモデルと、対応する mmproj ファイルで `llama-server` を起動します。既定の接続先は `http://127.0.0.1:8084` です。

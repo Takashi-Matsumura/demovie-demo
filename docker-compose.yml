@@ -1,0 +1,19 @@
+services:
+  app:
+    build:
+      context: .
+      # ブラウザから呼ぶ AI サーバの接続先。ビルド時に埋め込まれるので、変えたら --build で作り直す。
+      # 未指定なら既定値（127.0.0.1 の 8080 / 8084 / 50021 / 8090）を使う。
+      args:
+        NEXT_PUBLIC_LLM_URL: ${NEXT_PUBLIC_LLM_URL:-}
+        NEXT_PUBLIC_VISION_URL: ${NEXT_PUBLIC_VISION_URL:-}
+        NEXT_PUBLIC_VOICEVOX_URL: ${NEXT_PUBLIC_VOICEVOX_URL:-}
+        NEXT_PUBLIC_WHISPER_URL: ${NEXT_PUBLIC_WHISPER_URL:-}
+    container_name: demovie-demo
+    ports:
+      - "8063:3000"
+    environment:
+      # localhost 以外のアドレスで開くときに設定する（例: http://192.168.1.10:8063）
+      APP_ORIGIN: ${APP_ORIGIN:-}
+      TYPESAFE_API_KEY: ${TYPESAFE_API_KEY:-}
+    restart: unless-stopped
